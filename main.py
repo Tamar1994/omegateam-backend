@@ -18,6 +18,8 @@ import uuid
 import random
 import math
 from bson.objectid import ObjectId  
+from routers.joystick import router as joystick_router
+from routers.arbitros import router as arbitros_router
 
 # Carrega as variáveis de ambiente do arquivo .env
 load_dotenv()
@@ -32,6 +34,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ===== REGISTRAR ROUTERS =====
+app.include_router(joystick_router)
+app.include_router(arbitros_router)
 
 # Conexão com MongoDB
 MONGO_URI = os.getenv("MONGO_URI")
@@ -884,72 +890,6 @@ async def atualizar_ready_lateral(camp_id: str, num_quadra: int, dados: LateralR
         {"$set": {f"{dados.lateral_slot}_ready": dados.is_ready}}
     )
     return {"mensagem": "Status de prontidão atualizado!"}
-
-# --- ROTAS PARA A SESSÃO DO ÁRBITRO E LOBBY ---
-@app.get("/api/arbitro/{email}/campeonatos")
-async def listar_campeonatos_arbitro(email: str):
-    # Encontra todas as quadras onde este email foi escalado em qualquer função
-    quadras_cursor = db.quadras.find({
-        "$or": [
-            {"mesario_email": email}, {"central_email": email},
-            {"lateral1_email": email}, {"lateral2_email": email}, {"lateral3_email": email},
-            {"lateral4_email": email}, {"lateral5_email": email}
-        ]
-    })
-    quadras = await quadras_cursor.to_list(length=100)
-    
-    if not quadras:
-        return []
-
-    # Pega os IDs únicos dos campeonatos onde ele atua
-    camp_ids = list(set([q["campeonato_id"] for q in quadras]))
-    
-    from bson.objectid import ObjectId
-    # Busca os detalhes bonitos do campeonato para mostrar no Card
-    campeonatos_cursor = db.campeonatos.find({"_id": {"$in": [ObjectId(cid) for cid in camp_ids]}})
-    campeonatos = await campeonatos_cursor.to_list(length=100)
-    
-    for c in campeonatos:
-        c["_id"] = str(c["_id"])
-        
-    return campeonatos
-
-@app.get("/api/campeonatos/{camp_id}/minha-quadra/{email}")
-async def obter_minha_quadra(camp_id: str, email: str):
-    # Atualizado: Procura a quadra onde o email é QUALQUER membro da equipe
-    quadra = await db.quadras.find_one({
-        "campeonato_id": camp_id,
-        "$or": [
-            {"mesario_email": email}, {"central_email": email},
-            {"lateral1_email": email}, {"lateral2_email": email}, {"lateral3_email": email},
-            {"lateral4_email": email}, {"lateral5_email": email}
-        ]
-    })
-    
-    if not quadra:
-        raise HTTPException(status_code=404, detail="Você não está escalado em nenhuma quadra neste evento.")
-    
-    quadra["_id"] = str(quadra["_id"])
-    
-    # Garante que os status de ready existam no documento
-    for i in range(1, 6):
-        campo_ready = f"lateral{i}_ready"
-        if campo_ready not in quadra:
-            quadra[campo_ready] = False
-
-    # A MÁGICA ESTÁ AQUI: Descobre qual é a função desse email para o Frontend
-    funcao = "Desconhecida"
-    if quadra.get("mesario_email") == email: funcao = "Mesário"
-    elif quadra.get("central_email") == email: funcao = "Árbitro Central"
-    elif quadra.get("lateral1_email") == email: funcao = "Lateral 1"
-    elif quadra.get("lateral2_email") == email: funcao = "Lateral 2"
-    elif quadra.get("lateral3_email") == email: funcao = "Lateral 3"
-    elif quadra.get("lateral4_email") == email: funcao = "Lateral 4"
-    elif quadra.get("lateral5_email") == email: funcao = "Lateral 5"
-    
-    quadra["minha_funcao"] = funcao
-
-    return quadra
 
 @app.get("/api/campeonatos/{camp_id}/quadras/{num_quadra}/proxima-luta")
 async def buscar_proxima_luta(camp_id: str, num_quadra: int):
