@@ -27,6 +27,7 @@ SMTP_PORT = 587
 CORS_ORIGINS = [
     "http://localhost:5173",      # Frontend local
     "http://localhost:3000",      # Alternativa
+    "https://omegateam-frontend.onrender.com"
     # Adicionar aqui quando fizer deploy
     # "https://seu-frontend.onrender.com",
 ]
