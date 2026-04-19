@@ -291,22 +291,19 @@ async def obter_luta_atual(camp_id: str, num_quadra: str, db: AsyncIOMotorDataba
 async def obter_proxima_luta(camp_id: str, num_quadra: str, db: AsyncIOMotorDatabase = Depends(get_db)):
     """
     Obtém a próxima luta para o mesário puxar.
-    Retorna a primeira luta com status "Pendente" ou "Não Iniciada"
+    Retorna a primeira luta com status "Aguardando Chamada" (ainda não foi puxada)
     """
     try:
         num_quadra_int = int(num_quadra)
     except ValueError:
         raise HTTPException(status_code=400, detail="Número da quadra inválido")
     
-    # Busca primeira luta sem status definido ou com status "Pendente"
+    # Busca primeira luta DESTE CAMPEONATO ainda não puxada
+    # Status "Aguardando Chamada" = nunca foi puxada
     lutas_cursor = db.lutas.find({
         "campeonato_id": camp_id,
-        "quadra": num_quadra_int,
-        "$or": [
-            {"status": {"$exists": False}},
-            {"status": {"$in": ["Pendente", "Não Iniciada", None]}}
-        ]
-    }).sort("ordem_luta", 1).limit(1)  # Ordem cronológica
+        "status": "Aguardando Chamada"
+    }).sort("ordem_luta", 1).limit(1)
     
     lutas = await lutas_cursor.to_list(length=1)
     
@@ -314,8 +311,20 @@ async def obter_proxima_luta(camp_id: str, num_quadra: str, db: AsyncIOMotorData
         raise HTTPException(status_code=404, detail="Nenhuma luta pendente para esta quadra.")
     
     luta = lutas[0]
-    luta["_id"] = str(luta["_id"])
-    return luta
+    
+    # ✅ IMPORTANTE: Marcar que foi puxada e qual é a quadra
+    await db.lutas.update_one(
+        {"_id": luta["_id"]},
+        {"$set": {
+            "quadra": num_quadra_int,
+            "status": "Em Andamento"  # Agora está sendo disputada
+        }}
+    )
+    
+    # Buscar novamente para retornar com dados atualizados
+    luta_atualizada = await db.lutas.find_one({"_id": luta["_id"]})
+    luta_atualizada["_id"] = str(luta_atualizada["_id"])
+    return luta_atualizada
 
 
 @router.put("/lutas/{luta_id}/finalizar")
