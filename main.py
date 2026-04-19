@@ -941,11 +941,11 @@ async def obter_minha_quadra(camp_id: str, email: str):
     funcao = "Desconhecida"
     if quadra.get("mesario_email") == email: funcao = "Mesário"
     elif quadra.get("central_email") == email: funcao = "Árbitro Central"
-    elif quadra.get("lateral1_email") == email: funcao = "lateral1"
-    elif quadra.get("lateral2_email") == email: funcao = "lateral2"
-    elif quadra.get("lateral3_email") == email: funcao = "lateral3"
-    elif quadra.get("lateral4_email") == email: funcao = "lateral4"
-    elif quadra.get("lateral5_email") == email: funcao = "lateral5"
+    elif quadra.get("lateral1_email") == email: funcao = "Lateral 1"
+    elif quadra.get("lateral2_email") == email: funcao = "Lateral 2"
+    elif quadra.get("lateral3_email") == email: funcao = "Lateral 3"
+    elif quadra.get("lateral4_email") == email: funcao = "Lateral 4"
+    elif quadra.get("lateral5_email") == email: funcao = "Lateral 5"
     
     quadra["minha_funcao"] = funcao
 
