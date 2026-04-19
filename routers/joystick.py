@@ -18,13 +18,20 @@ class ConnectionManager:
     
     async def connect(self, luta_id: str, lateral_email: str, websocket: WebSocket):
         """Conecta um árbitro lateral ao WebSocket"""
-        await websocket.accept()
-        
-        if luta_id not in self.active_connections:
-            self.active_connections[luta_id] = {}
-        
-        self.active_connections[luta_id][lateral_email] = websocket
-        print(f"✅ Lateral {lateral_email} conectado à luta {luta_id}")
+        try:
+            print(f"  [ACEITANDO] WebSocket...")
+            await websocket.accept()
+            print(f"  [ACEITO] WebSocket aceito com sucesso!")
+            
+            if luta_id not in self.active_connections:
+                self.active_connections[luta_id] = {}
+            
+            self.active_connections[luta_id][lateral_email] = websocket
+            print(f"✅ LATERAL CONECTADO: {lateral_email} → luta {luta_id}")
+            print(f"   Conexões ativas nesta luta: {list(self.active_connections[luta_id].keys())}")
+        except Exception as e:
+            print(f"❌ ERRO AO ACEITAR WEBSOCKET: {type(e).__name__}: {e}")
+            raise
     
     async def connect_mesario(self, luta_id: str, numero_quadra: int, websocket: WebSocket):
         """Conecta o Mesário ao WebSocket"""
@@ -90,8 +97,21 @@ async def websocket_lateral(websocket: WebSocket, luta_id: str, lateral_email: s
     4. Se houver coincidência (2+ árbitros), ponto é validado
     5. Confirmação é enviada de volta para todos os laterais
     """
-    print(f"🔌 Tentativa de conexão lateral: luta_id={luta_id}, lateral_email={lateral_email}")
-    await manager.connect(luta_id, lateral_email, websocket)
+    print(f"\n{'='*60}")
+    print(f"🔌 WEBSOCKET LATERAL - TENTATIVA DE CONEXÃO")
+    print(f"{'='*60}")
+    print(f"  Hora: {__import__('datetime').datetime.now().isoformat()}")
+    print(f"  Luta ID: {luta_id}")
+    print(f"  Email: {lateral_email}")
+    print(f"  Headers: {dict(websocket.headers)}")
+    print(f"{'='*60}\n")
+    
+    try:
+        await manager.connect(luta_id, lateral_email, websocket)
+        print(f"✅ CONEXÃO ACEITA: lateral={lateral_email}, luta={luta_id}")
+    except Exception as e:
+        print(f"❌ ERRO AO CONECTAR: {e}")
+        raise
     
     try:
         while True:
@@ -143,7 +163,25 @@ async def websocket_lateral(websocket: WebSocket, luta_id: str, lateral_email: s
                 await manager.broadcast_to_all_mesarios(mensagem_validacao)
     
     except WebSocketDisconnect:
+        print(f"\n{'='*60}")
+        print(f"❌ WEBSOCKET LATERAL DESCONECTADO")
+        print(f"{'='*60}")
+        print(f"  Hora: {__import__('datetime').datetime.now().isoformat()}")
+        print(f"  Lateral: {lateral_email}")
+        print(f"  Luta: {luta_id}")
+        print(f"{'='*60}\n")
         manager.disconnect(luta_id, lateral_email)
+    except Exception as e:
+        print(f"\n{'='*60}")
+        print(f"❌ ERRO INESPERADO NO WEBSOCKET LATERAL")
+        print(f"{'='*60}")
+        print(f"  Tipo de erro: {type(e).__name__}")
+        print(f"  Mensagem: {e}")
+        print(f"  Lateral: {lateral_email}")
+        print(f"  Luta: {luta_id}")
+        print(f"{'='*60}\n")
+        manager.disconnect(luta_id, lateral_email)
+        raise
 
 
 @router.websocket("/ws/poomsae/{luta_id}/{juiz_email}")
@@ -226,8 +264,20 @@ async def websocket_mesario(websocket: WebSocket, luta_id: str, numero_quadra: i
     3. Quando um ponto é validado pela Coincidence Window, recebe notificação
     4. Atualiza automaticamente o placar
     """
-    print(f"🔌 Tentativa de conexão mesário: luta_id={luta_id}, numero_quadra={numero_quadra}")
-    await manager.connect_mesario(luta_id, numero_quadra, websocket)
+    print(f"\n{'='*60}")
+    print(f"🔌 WEBSOCKET MESARIO - TENTATIVA DE CONEXÃO")
+    print(f"{'='*60}")
+    print(f"  Hora: {__import__('datetime').datetime.now().isoformat()}")
+    print(f"  Luta ID: {luta_id}")
+    print(f"  Número Quadra: {numero_quadra}")
+    print(f"  Headers: {dict(websocket.headers)}")
+    print(f"{'='*60}\n")
+    
+    try:
+        await manager.connect_mesario(luta_id, numero_quadra, websocket)
+    except Exception as e:
+        print(f"❌ ERRO AO CONECTAR MESARIO: {e}")
+        raise
     
     try:
         while True:
@@ -239,7 +289,14 @@ async def websocket_mesario(websocket: WebSocket, luta_id: str, numero_quadra: i
                 await websocket.send_json({"tipo": "pong"})
     
     except WebSocketDisconnect:
-        print(f"❌ Mesário desconectado: luta_id={luta_id}, numero_quadra={numero_quadra}")
+        print(f"\n{'='*60}")
+        print(f"❌ WEBSOCKET MESARIO DESCONECTADO")
+        print(f"{'='*60}")
+        print(f"  Hora: {__import__('datetime').datetime.now().isoformat()}")
+        print(f"  Luta: {luta_id}")
+        print(f"  Quadra: {numero_quadra}")
+        print(f"{'='*60}\n")
+        manager.disconnect_mesario(luta_id, numero_quadra)
         manager.disconnect_mesario(luta_id, numero_quadra)
 
 
