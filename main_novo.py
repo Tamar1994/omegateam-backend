@@ -12,7 +12,7 @@ from config.settings import CORS_ORIGINS, PASTA_UPLOADS, PASTA_OFICIOS
 from database.connection import connect_db, close_db
 
 # Importações de routers
-from routers import auth, users, campeonatos, uploads, inscricoes, lutas, arbitros, quadras
+from routers import auth, users, campeonatos, uploads, inscricoes, lutas, arbitros, quadras, joystick
 
 # ==========================================
 # EVENTOS DE CICLO DE VIDA
@@ -73,6 +73,7 @@ app.include_router(inscricoes.router)
 app.include_router(lutas.router)
 app.include_router(arbitros.router)
 app.include_router(quadras.router)
+app.include_router(joystick.router)
 
 # ==========================================
 # ROTA DE HEALTH CHECK
