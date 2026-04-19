@@ -358,9 +358,18 @@ async def conexoes_ativas(luta_id: str, db: AsyncIOMotorDatabase = Depends(get_d
 @router.get("/joystick/health")
 async def joystick_health():
     """Health check para o sistema de WebSocket do Joystick"""
+    import fastapi
+    import starlette
+    
     return {
         "status": "ok",
         "mensagem": "Sistema de Joystick está pronto para WebSocket",
+        "diagnostico": {
+            "fastapi_version": fastapi.__version__,
+            "starlette_version": starlette.__version__,
+            "websocket_suportado": True,
+            "tempo_servidor": __import__('datetime').datetime.now().isoformat()
+        },
         "websocket_endpoints": [
             "/api/ws/lateral/{luta_id}/{lateral_email}",
             "/api/ws/mesario/{luta_id}/{numero_quadra}",
@@ -368,6 +377,16 @@ async def joystick_health():
         ],
         "conexoes_ativas": {
             "laterais": sum(len(emails) for emails in manager.active_connections.values()),
-            "mesarios": len(manager.mesario_connections)
-        }
+            "mesarios": len(manager.mesario_connections),
+            "lutas_ativas": len(manager.active_connections),
+            "detalhe_laterais": {
+                luta_id: list(emails.keys()) 
+                for luta_id, emails in manager.active_connections.items()
+            }
+        },
+        "dicas_para_debug": [
+            "Se receber erro 1006: verifique se o servidor está rodando",
+            "WebSocket requer upgrade HTTP 101, verificar proxy/firewall",
+            "URL deve usar wss:// em produção (Render com https)"
+        ]
     }
