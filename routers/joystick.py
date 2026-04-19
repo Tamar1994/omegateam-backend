@@ -312,7 +312,6 @@ async def websocket_lateral(websocket: WebSocket, campeonato_id: str, lateral_em
         manager.disconnect(campeonato_id, lateral_email)
         
         # 🔔 NOTIFICAR O MESÁRIO QUE UM LATERAL DESCONECTOU
-        import asyncio
         asyncio.create_task(manager.notificar_status_laterais(campeonato_id))
     except Exception as e:
         print(f"\n{'='*60}")
@@ -326,7 +325,6 @@ async def websocket_lateral(websocket: WebSocket, campeonato_id: str, lateral_em
         manager.disconnect(campeonato_id, lateral_email)
         
         # 🔔 NOTIFICAR O MESÁRIO QUE UM LATERAL FOI DESCONECTADO (POR ERRO)
-        import asyncio
         asyncio.create_task(manager.notificar_status_laterais(campeonato_id))
         raise
 
