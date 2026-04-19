@@ -44,7 +44,7 @@ async def salvar_equipe_quadra(camp_id: str, dados: EquipeQuadraData, db: AsyncI
 
 
 @router.put("/campeonatos/{camp_id}/quadras/{num_quadra}/ready")
-async def atualizar_ready_lateral(camp_id: str, num_quadra: int, dados: LateralReadyData):
+async def atualizar_ready_lateral(camp_id: str, num_quadra: int, dados: LateralReadyData, db: AsyncIOMotorDatabase = Depends(get_db)):
     """Atualiza o status de prontidão de um lateral (para o joystick)"""
     resultado = await db.quadras.update_one(
         {"campeonato_id": camp_id, "numero_quadra": num_quadra},
