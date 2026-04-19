@@ -267,11 +267,16 @@ async def gerar_cronograma(camp_id: str, config: ConfigCronograma, db: AsyncIOMo
 
 
 @router.get("/campeonatos/{camp_id}/quadras/{num_quadra}/luta-atual")
-async def obter_luta_atual(camp_id: str, num_quadra: int, db: AsyncIOMotorDatabase = Depends(get_db)):
+async def obter_luta_atual(camp_id: str, num_quadra: str, db: AsyncIOMotorDatabase = Depends(get_db)):
     """Obtém a luta que está em andamento nesta quadra"""
+    try:
+        num_quadra_int = int(num_quadra)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Número da quadra inválido")
+    
     luta = await db.lutas.find_one({
         "campeonato_id": camp_id, 
-        "quadra": num_quadra, 
+        "quadra": num_quadra_int, 
         "status": "Em Andamento"
     })
     
@@ -283,15 +288,20 @@ async def obter_luta_atual(camp_id: str, num_quadra: int, db: AsyncIOMotorDataba
 
 
 @router.get("/campeonatos/{camp_id}/quadras/{num_quadra}/proxima-luta")
-async def obter_proxima_luta(camp_id: str, num_quadra: int, db: AsyncIOMotorDatabase = Depends(get_db)):
+async def obter_proxima_luta(camp_id: str, num_quadra: str, db: AsyncIOMotorDatabase = Depends(get_db)):
     """
     Obtém a próxima luta para o mesário puxar.
     Retorna a primeira luta com status "Pendente" ou "Não Iniciada"
     """
+    try:
+        num_quadra_int = int(num_quadra)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Número da quadra inválido")
+    
     # Busca primeira luta sem status definido ou com status "Pendente"
     lutas_cursor = db.lutas.find({
         "campeonato_id": camp_id,
-        "quadra": num_quadra,
+        "quadra": num_quadra_int,
         "$or": [
             {"status": {"$exists": False}},
             {"status": {"$in": ["Pendente", "Não Iniciada", None]}}
@@ -309,7 +319,7 @@ async def obter_proxima_luta(camp_id: str, num_quadra: int, db: AsyncIOMotorData
 
 
 @router.put("/lutas/{luta_id}/finalizar")
-async def finalizar_luta_banco(luta_id: str, dados: FinalizarLutaData):
+async def finalizar_luta_banco(luta_id: str, dados: FinalizarLutaData, db: AsyncIOMotorDatabase = Depends(get_db)):
     """Finaliza uma luta e salva os resultados"""
     resultado = await db.lutas.update_one(
         {"_id": ObjectId(luta_id)},
