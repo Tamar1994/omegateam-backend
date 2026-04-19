@@ -13,22 +13,22 @@ router = APIRouter(prefix="/api", tags=["Joystick"])
 # Gerenciador de conexões WebSocket
 class ConnectionManager:
     def __init__(self):
-        self.active_connections: dict = {}  # {luta_id: {lateral_email: websocket}}
+        self.active_connections: dict = {}  # {campeonato_id: {lateral_email: websocket}}
         self.mesario_connections: dict = {}  # {luta_id: websocket}
     
-    async def connect(self, luta_id: str, lateral_email: str, websocket: WebSocket):
+    async def connect(self, campeonato_id: str, lateral_email: str, websocket: WebSocket):
         """Conecta um árbitro lateral ao WebSocket"""
         try:
             print(f"  [ACEITANDO] WebSocket...")
             await websocket.accept()
             print(f"  [ACEITO] WebSocket aceito com sucesso!")
             
-            if luta_id not in self.active_connections:
-                self.active_connections[luta_id] = {}
+            if campeonato_id not in self.active_connections:
+                self.active_connections[campeonato_id] = {}
             
-            self.active_connections[luta_id][lateral_email] = websocket
-            print(f"✅ LATERAL CONECTADO: {lateral_email} → luta {luta_id}")
-            print(f"   Conexões ativas nesta luta: {list(self.active_connections[luta_id].keys())}")
+            self.active_connections[campeonato_id][lateral_email] = websocket
+            print(f"✅ LATERAL CONECTADO: {lateral_email} → campeonato {campeonato_id}")
+            print(f"   Conexões ativas neste campeonato: {list(self.active_connections[campeonato_id].keys())}")
         except Exception as e:
             print(f"❌ ERRO AO ACEITAR WEBSOCKET: {type(e).__name__}: {e}")
             raise
@@ -39,16 +39,16 @@ class ConnectionManager:
         self.mesario_connections[f"{luta_id}:{numero_quadra}"] = websocket
         print(f"✅ Mesário da quadra {numero_quadra} conectado à luta {luta_id}")
     
-    def disconnect(self, luta_id: str, lateral_email: str):
+    def disconnect(self, campeonato_id: str, lateral_email: str):
         """Desconecta um árbitro lateral"""
-        if luta_id in self.active_connections:
-            if lateral_email in self.active_connections[luta_id]:
-                del self.active_connections[luta_id][lateral_email]
+        if campeonato_id in self.active_connections:
+            if lateral_email in self.active_connections[campeonato_id]:
+                del self.active_connections[campeonato_id][lateral_email]
             
-            if not self.active_connections[luta_id]:
-                del self.active_connections[luta_id]
+            if not self.active_connections[campeonato_id]:
+                del self.active_connections[campeonato_id]
         
-        print(f"❌ Lateral {lateral_email} desconectado da luta {luta_id}")
+        print(f"❌ Lateral {lateral_email} desconectado do campeonato {campeonato_id}")
     
     def disconnect_mesario(self, luta_id: str, numero_quadra: int):
         """Desconecta o Mesário"""
@@ -58,17 +58,17 @@ class ConnectionManager:
         
         print(f"❌ Mesário da quadra {numero_quadra} desconectado da luta {luta_id}")
     
-    async def broadcast_to_luta(self, luta_id: str, message: dict):
-        """Envia mensagem para todos os árbitros de uma luta"""
-        if luta_id not in self.active_connections:
+    async def broadcast_to_luta(self, campeonato_id: str, message: dict):
+        """Envia mensagem para todos os árbitros de um campeonato"""
+        if campeonato_id not in self.active_connections:
             return
         
-        for lateral_email, websocket in list(self.active_connections[luta_id].items()):
+        for lateral_email, websocket in list(self.active_connections[campeonato_id].items()):
             try:
                 await websocket.send_json(message)
             except Exception as e:
                 print(f"❌ Erro ao enviar para {lateral_email}: {e}")
-                self.disconnect(luta_id, lateral_email)
+                self.disconnect(campeonato_id, lateral_email)
     
     async def broadcast_to_all_mesarios(self, message: dict):
         """Envia mensagem para TODOS os Mesários conectados"""
@@ -80,14 +80,14 @@ class ConnectionManager:
                 luta_id, numero_quadra = key.split(":")
                 self.disconnect_mesario(luta_id, int(numero_quadra))
     
-    async def notificar_status_laterais(self, luta_id: str):
+    async def notificar_status_laterais(self, campeonato_id: str):
         """Notifica o Mesário que o status dos laterais mudou (alguém conectou/desconectou)"""
         # Pega lista de laterais conectados
-        laterais_conectados = list(self.active_connections.get(luta_id, {}).keys()) if luta_id in self.active_connections else []
+        laterais_conectados = list(self.active_connections.get(campeonato_id, {}).keys()) if campeonato_id in self.active_connections else []
         
         mensagem = {
             "status": "laterais_atualizacao",
-            "luta_id": luta_id,
+            "campeonato_id": campeonato_id,
             "laterais_conectados": laterais_conectados,
             "total_laterais": len(laterais_conectados),
             "timestamp": __import__('datetime').datetime.now().isoformat()
@@ -95,13 +95,13 @@ class ConnectionManager:
         
         # Enviar para TODOS os Mesários desta luta
         for key, websocket in list(self.mesario_connections.items()):
-            if key.startswith(f"{luta_id}:"):
-                try:
-                    await websocket.send_json(mensagem)
-                except Exception as e:
-                    print(f"❌ Erro ao notificar Mesário {key}: {e}")
+            # Nota: Mesário armazena como "luta_id:numero_quadra", vamos enviar para todos por enquanto
+            try:
+                await websocket.send_json(mensagem)
+            except Exception as e:
+                print(f"❌ Erro ao notificar Mesário {key}: {e}")
 
-    async def notificar_luta_iniciada(self, luta_id: str, luta_data: dict):
+    async def notificar_luta_iniciada(self, campeonato_id: str, luta_data: dict):
         """
         🎬 Notifica TODOS os laterais sobre luta iniciada
         
@@ -117,16 +117,16 @@ class ConnectionManager:
         """
         mensagem = {
             "status": "luta_iniciada",
-            "luta_id": luta_id,
+            "luta_id": luta_data.get("luta_id"),
             "modalidade": luta_data.get("modalidade", "Kyorugui"),
             "atleta_vermelho": luta_data.get("atleta_vermelho", "Atleta 1"),
             "atleta_azul": luta_data.get("atleta_azul", "Atleta 2"),
             "timestamp": __import__('datetime').datetime.now().isoformat()
         }
 
-        # Enviar para TODOS os laterais desta luta
-        if luta_id in self.active_connections:
-            for lateral_email, websocket in list(self.active_connections[luta_id].items()):
+        # Enviar para TODOS os laterais deste campeonato
+        if campeonato_id in self.active_connections:
+            for lateral_email, websocket in list(self.active_connections[campeonato_id].items()):
                 try:
                     print(f"  📤 Enviando luta_iniciada para {lateral_email}...")
                     await websocket.send_json(mensagem)
@@ -138,13 +138,13 @@ class ConnectionManager:
 manager = ConnectionManager()
 
 
-@router.websocket("/ws/lateral/{luta_id}/{lateral_email}")
-async def websocket_lateral(websocket: WebSocket, luta_id: str, lateral_email: str):
+@router.websocket("/ws/lateral/{campeonato_id}/{lateral_email}")
+async def websocket_lateral(websocket: WebSocket, campeonato_id: str, lateral_email: str):
     """
     WebSocket para árbitro lateral enviar pontos e receber confirmações.
     
     Fluxo:
-    1. Lateral conecta ao WebSocket
+    1. Lateral conecta ao WebSocket (identificado por campeonato_id, não luta_id)
     2. Lateral carrega em botão ("+1", "+2", "+3")
     3. Servidor registra clique e aguarda coincidência
     4. Se houver coincidência (2+ árbitros), ponto é validado
@@ -154,13 +154,13 @@ async def websocket_lateral(websocket: WebSocket, luta_id: str, lateral_email: s
     print(f"🔌 WEBSOCKET LATERAL - TENTATIVA DE CONEXÃO")
     print(f"{'='*60}")
     print(f"  Hora: {__import__('datetime').datetime.now().isoformat()}")
-    print(f"  Luta ID: {luta_id}")
+    print(f"  Campeonato ID: {campeonato_id}")
     print(f"  Email: {lateral_email}")
     print(f"  Headers: {dict(websocket.headers)}")
     print(f"{'='*60}\n")
     
     try:
-        await manager.connect(luta_id, lateral_email, websocket)
+        await manager.connect(campeonato_id, lateral_email, websocket)
         print(f"✅ CONEXÃO ACEITA: lateral={lateral_email}, luta={luta_id}")
         
         # 🔔 NOTIFICAR O MESÁRIO QUE UM LATERAL CONECTOU
@@ -174,12 +174,23 @@ async def websocket_lateral(websocket: WebSocket, luta_id: str, lateral_email: s
             # Receber mensagem do lateral
             data = await websocket.receive_json()
             
+            # ✅ IMPORTANTE: Extrair luta_id da mensagem (enviado pelo frontend)
+            luta_id = data.get("luta_id")
+            if not luta_id and data.get("tipo") != "lateral_pronto":
+                # Para pontos, luta_id é obrigatório
+                await websocket.send_json({
+                    "status": "erro",
+                    "mensagem": "luta_id não encontrado na mensagem"
+                })
+                continue
+            
             # ✋ HANDLER: Lateral marca como pronto
             if data.get("tipo") == "lateral_pronto":
                 print(f"\n{'='*60}")
                 print(f"✋ LATERAL MARCANDO COMO PRONTO")
                 print(f"{'='*60}")
                 print(f"  Email: {lateral_email}")
+                print(f"  Luta ID: {luta_id}")
                 print(f"  Timestamp: {data.get('timestamp')}")
                 # Aqui poderia marcar no banco, mas por enquanto é só feedback
                 await websocket.send_json({
@@ -228,8 +239,8 @@ async def websocket_lateral(websocket: WebSocket, luta_id: str, lateral_email: s
                     "validado_em": ponto_validado["validado_em"]
                 }
                 
-                # Broadcast para todos os laterais
-                await manager.broadcast_to_luta(luta_id, mensagem_validacao)
+                # Broadcast para todos os laterais deste campeonato
+                await manager.broadcast_to_luta(campeonato_id, mensagem_validacao)
                 
                 # Broadcast para todos os Mesários
                 await manager.broadcast_to_all_mesarios(mensagem_validacao)
@@ -240,13 +251,13 @@ async def websocket_lateral(websocket: WebSocket, luta_id: str, lateral_email: s
         print(f"{'='*60}")
         print(f"  Hora: {__import__('datetime').datetime.now().isoformat()}")
         print(f"  Lateral: {lateral_email}")
-        print(f"  Luta: {luta_id}")
+        print(f"  Campeonato: {campeonato_id}")
         print(f"{'='*60}\n")
-        manager.disconnect(luta_id, lateral_email)
+        manager.disconnect(campeonato_id, lateral_email)
         
         # 🔔 NOTIFICAR O MESÁRIO QUE UM LATERAL DESCONECTOU
         import asyncio
-        asyncio.create_task(manager.notificar_status_laterais(luta_id))
+        asyncio.create_task(manager.notificar_status_laterais(campeonato_id))
     except Exception as e:
         print(f"\n{'='*60}")
         print(f"❌ ERRO INESPERADO NO WEBSOCKET LATERAL")
@@ -254,13 +265,13 @@ async def websocket_lateral(websocket: WebSocket, luta_id: str, lateral_email: s
         print(f"  Tipo de erro: {type(e).__name__}")
         print(f"  Mensagem: {e}")
         print(f"  Lateral: {lateral_email}")
-        print(f"  Luta: {luta_id}")
+        print(f"  Campeonato: {campeonato_id}")
         print(f"{'='*60}\n")
-        manager.disconnect(luta_id, lateral_email)
+        manager.disconnect(campeonato_id, lateral_email)
         
         # 🔔 NOTIFICAR O MESÁRIO QUE UM LATERAL FOI DESCONECTADO (POR ERRO)
         import asyncio
-        asyncio.create_task(manager.notificar_status_laterais(luta_id))
+        asyncio.create_task(manager.notificar_status_laterais(campeonato_id))
         raise
 
 
@@ -480,6 +491,8 @@ async def notificar_laterais_luta_iniciada(luta_id: str, dados: dict, db: AsyncI
     Chamado pelo Mesário quando puxa a próxima luta.
     Envia modalidade (Kyorugui/Poomsae) e dados do atletas para lateral renderizar joystick correto.
     """
+    from bson import ObjectId
+    
     print(f"\n{'='*60}")
     print(f"🎬 NOTIFICANDO LATERAIS SOBRE LUTA INICIADA")
     print(f"{'='*60}")
@@ -487,15 +500,26 @@ async def notificar_laterais_luta_iniciada(luta_id: str, dados: dict, db: AsyncI
     print(f"  Dados: {dados}")
     
     try:
+        # ⚠️ IMPORTANTE: Buscar a luta no banco para descobrir seu campeonato_id
+        # Os laterals conectam via campeonato_id, não via luta_id!
+        luta = await db.lutas.find_one({"_id": ObjectId(luta_id)})
+        
+        if not luta:
+            raise HTTPException(status_code=404, detail="Luta não encontrada")
+        
+        campeonato_id = luta.get("campeonato_id")
+        print(f"  Campeonato ID: {campeonato_id}")
+        
         # Prepara dados da luta para enviar
         luta_data = {
+            "luta_id": luta_id,  # ✅ Enviar luta_id também para frontend
             "modalidade": dados.get("modalidade", "Kyorugui"),
             "atleta_vermelho": dados.get("atleta_vermelho", "Atleta 1"),
             "atleta_azul": dados.get("atleta_azul", "Atleta 2")
         }
         
-        # Notifica todos os laterais conectados
-        await manager.notificar_luta_iniciada(luta_id, luta_data)
+        # ✅ Notifica laterals usando campeonato_id (assim encontra as conexões)
+        await manager.notificar_luta_iniciada(campeonato_id, luta_data)
         
         print(f"✅ Notificação enviada para laterais")
         print(f"{'='*60}\n")
@@ -504,6 +528,7 @@ async def notificar_laterais_luta_iniciada(luta_id: str, dados: dict, db: AsyncI
             "status": "sucesso",
             "mensagem": "Laterais notificados sobre luta iniciada",
             "luta_id": luta_id,
+            "campeonato_id": campeonato_id,
             "luta_data": luta_data
         }
     except Exception as e:
