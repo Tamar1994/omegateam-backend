@@ -311,7 +311,31 @@ async def websocket_lateral(websocket: WebSocket, campeonato_id: str, lateral_em
         print(f"{'='*60}\n")
         manager.disconnect(campeonato_id, lateral_email)
         
-        # 🔔 NOTIFICAR O MESÁRIO QUE UM LATERAL DESCONECTOU
+        # � RESETAR O READY DO LATERAL QUE DESCONECTOU
+        quadra = await db.quadras.find_one({
+            "campeonato_id": campeonato_id,
+            "$or": [
+                {"lateral1_email": lateral_email},
+                {"lateral2_email": lateral_email},
+                {"lateral3_email": lateral_email},
+                {"lateral4_email": lateral_email},
+                {"lateral5_email": lateral_email}
+            ]
+        })
+        
+        if quadra:
+            numero_quadra = quadra.get("numero_quadra")
+            for i in range(1, 6):
+                if quadra.get(f"lateral{i}_email") == lateral_email:
+                    # ❌ Resetar ready para false
+                    await db.quadras.update_one(
+                        {"campeonato_id": campeonato_id, "numero_quadra": numero_quadra},
+                        {"$set": {f"lateral{i}_ready": False}}
+                    )
+                    print(f"  🔴 Resetado: lateral{i}_ready = False (lateral desconectou)")
+                    break
+        
+        # �🔔 NOTIFICAR O MESÁRIO QUE UM LATERAL DESCONECTOU
         asyncio.create_task(manager.notificar_status_laterais(campeonato_id))
     except Exception as e:
         print(f"\n{'='*60}")
@@ -324,7 +348,31 @@ async def websocket_lateral(websocket: WebSocket, campeonato_id: str, lateral_em
         print(f"{'='*60}\n")
         manager.disconnect(campeonato_id, lateral_email)
         
-        # 🔔 NOTIFICAR O MESÁRIO QUE UM LATERAL FOI DESCONECTADO (POR ERRO)
+        # � RESETAR O READY DO LATERAL (POR ERRO)
+        quadra = await db.quadras.find_one({
+            "campeonato_id": campeonato_id,
+            "$or": [
+                {"lateral1_email": lateral_email},
+                {"lateral2_email": lateral_email},
+                {"lateral3_email": lateral_email},
+                {"lateral4_email": lateral_email},
+                {"lateral5_email": lateral_email}
+            ]
+        })
+        
+        if quadra:
+            numero_quadra = quadra.get("numero_quadra")
+            for i in range(1, 6):
+                if quadra.get(f"lateral{i}_email") == lateral_email:
+                    # ❌ Resetar ready para false
+                    await db.quadras.update_one(
+                        {"campeonato_id": campeonato_id, "numero_quadra": numero_quadra},
+                        {"$set": {f"lateral{i}_ready": False}}
+                    )
+                    print(f"  🔴 Resetado: lateral{i}_ready = False (erro na conexão)")
+                    break
+        
+        # �🔔 NOTIFICAR O MESÁRIO QUE UM LATERAL FOI DESCONECTADO (POR ERRO)
         asyncio.create_task(manager.notificar_status_laterais(campeonato_id))
         raise
 
