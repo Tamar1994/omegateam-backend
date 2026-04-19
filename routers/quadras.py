@@ -4,11 +4,20 @@ Rotas de Quadras (Gestão de equipes e status)
 from fastapi import APIRouter, HTTPException, Depends
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from bson.objectid import ObjectId
+import random
+import string
 from models.campeonato import EquipeQuadraData
 from models.luta import LateralReadyData
 from database.connection import get_db
 
 router = APIRouter(prefix="/api", tags=["Quadras"])
+
+
+def gerar_token_scoreboard():
+    """Gera um token único para acesso ao Scoreboard no formato XXXX-XXXX"""
+    parte1 = ''.join(random.choices(string.ascii_uppercase + string.digits, k=4))
+    parte2 = ''.join(random.choices(string.ascii_uppercase + string.digits, k=4))
+    return f"{parte1}-{parte2}"
 
 
 @router.get("/campeonatos/{camp_id}/quadras")
@@ -24,6 +33,15 @@ async def listar_equipes_quadras(camp_id: str, db: AsyncIOMotorDatabase = Depend
 @router.post("/campeonatos/{camp_id}/quadras")
 async def salvar_equipe_quadra(camp_id: str, dados: EquipeQuadraData, db: AsyncIOMotorDatabase = Depends(get_db)):
     """Salva a equipe de uma quadra (Mesário, Central e Laterais)"""
+    
+    # Gerar token da quadra se não existir
+    quadra_existente = await db.quadras.find_one({
+        "campeonato_id": camp_id,
+        "numero_quadra": dados.numero_quadra
+    })
+    
+    token_scoreboard = quadra_existente.get("token_scoreboard") if quadra_existente else gerar_token_scoreboard()
+    
     # Atualiza a quadra se existir, ou cria uma nova
     await db.quadras.update_one(
         {"campeonato_id": camp_id, "numero_quadra": dados.numero_quadra},
@@ -36,11 +54,16 @@ async def salvar_equipe_quadra(camp_id: str, dados: EquipeQuadraData, db: AsyncI
             "lateral2_email": dados.lateral2_email,
             "lateral3_email": dados.lateral3_email,
             "lateral4_email": dados.lateral4_email,
-            "lateral5_email": dados.lateral5_email
+            "lateral5_email": dados.lateral5_email,
+            "token_scoreboard": token_scoreboard
         }},
         upsert=True
     )
-    return {"mensagem": f"Equipe da Quadra {dados.numero_quadra} salva com sucesso!"}
+    
+    return {
+        "mensagem": f"Equipe da Quadra {dados.numero_quadra} salva com sucesso!",
+        "token_scoreboard": token_scoreboard
+    }
 
 
 @router.put("/campeonatos/{camp_id}/quadras/{num_quadra}/ready")
