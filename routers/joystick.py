@@ -4,6 +4,7 @@ Rotas de Joystick com WebSocket para Árbitros Laterais (Tempo Real)
 import json
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, HTTPException
 from motor.motor_asyncio import AsyncIOMotorDatabase
+from bson import ObjectId
 from database.connection import get_db
 from services.joystick_service import joystick_manager
 import asyncio
@@ -268,12 +269,16 @@ async def websocket_lateral(websocket: WebSocket, campeonato_id: str, lateral_em
             tipo_ponto = data["tipo_ponto"]  # "+1", "+2", "+3"
             cor = data["cor"]  # "vermelho" ou "azul"
             
-            # Registrar clique e verificar validação
+            # 📊 Contar quantos laterais conectados para validação por maioria
+            total_laterais_conectados = len(manager.active_connections.get(campeonato_id, {}))
+            
+            # Registrar clique e verificar validação (MAIORIA ABSOLUTA)
             ponto_validado = joystick_manager.registrar_clique_lateral(
                 luta_id=luta_id,
                 lateral_email=lateral_email,
                 tipo_ponto=tipo_ponto,
-                cor=cor
+                cor=cor,
+                total_laterais=total_laterais_conectados  # ✅ Passa o total de laterais
             )
             
             # Enviar confirmação de recebimento ao lateral
@@ -444,6 +449,64 @@ async def websocket_poomsae(websocket: WebSocket, luta_id: str, juiz_email: str)
     
     except WebSocketDisconnect:
         print(f"Juiz {juiz_email} desconectado da sessão Poomsae {luta_id}")
+
+
+@router.post("/lutas/{luta_id}/notificar-fim-luta")
+async def notificar_fim_luta(luta_id: str, db: AsyncIOMotorDatabase = Depends(get_db)):
+    """
+    Notifica TODOS os laterais que a luta foi FINALIZADA.
+    Chamado pelo Mesário ao encerrar a luta.
+    
+    Envia:
+    {
+        "status": "luta_finalizada",
+        "luta_id": luta_id,
+        "timestamp": ISO
+    }
+    """
+    print(f"\n{'='*60}")
+    print(f"🎬 NOTIFICANDO LATERAIS - LUTA FINALIZADA")
+    print(f"{'='*60}")
+    print(f"  Luta ID: {luta_id}")
+    
+    # Procurar a luta para pegar campeonato_id
+    try:
+        luta = await db.lutas.find_one({"_id": ObjectId(luta_id)})
+    except:
+        luta = await db.lutas.find_one({"_id": luta_id})
+    
+    if not luta:
+        print(f"  ❌ Luta não encontrada")
+        print(f"{'='*60}\n")
+        return {"status": "erro", "mensagem": "Luta não encontrada"}
+    
+    campeonato_id = luta.get("campeonato_id")
+    
+    mensagem = {
+        "status": "luta_finalizada",
+        "luta_id": luta_id,
+        "timestamp": __import__('datetime').datetime.now().isoformat()
+    }
+    
+    # Enviar para TODOS os laterais deste campeonato
+    laterais_notificados = 0
+    if campeonato_id in manager.active_connections:
+        for lateral_email, websocket in list(manager.active_connections[campeonato_id].items()):
+            try:
+                await websocket.send_json(mensagem)
+                print(f"  📤 Enviando para {lateral_email}... ✅")
+                laterais_notificados += 1
+            except Exception as e:
+                print(f"  ❌ Erro ao notificar lateral {lateral_email}: {e}")
+    
+    print(f"  ✅ Notificação enviada para {laterais_notificados} laterais")
+    print(f"{'='*60}\n")
+    
+    return {
+        "status": "ok",
+        "mensagem": "Luta finalizada notificada",
+        "laterais_notificados": laterais_notificados
+    }
 
 
 @router.websocket("/ws/mesario/{luta_id}/{numero_quadra}")

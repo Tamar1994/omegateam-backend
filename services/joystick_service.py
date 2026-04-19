@@ -13,6 +13,7 @@ import statistics
 class CoincidenceWindow:
     """Janela de Coincidência para validação de pontos em Kyorugui"""
     luta_id: str
+    total_laterais: int = 2  # Total de árbitros laterais para calcular maioria
     lateral_cliques: Dict[str, list] = field(default_factory=dict)  # {"lateral1": [clicks], "lateral2": [...]}
     tempo_inicio: datetime = field(default_factory=datetime.utcnow)
     duracao_ms: int = 1500  # 1.5 segundos - padrão Taekwondo
@@ -35,11 +36,23 @@ class CoincidenceWindow:
     
     def validar_ponto(self) -> Optional[dict]:
         """
-        Valida se há coincidência de votos entre árbitros.
+        Valida se há MAIORIA ABSOLUTA de votos entre árbitros (árbitros DIFERENTES).
+        
+        Maioria Absoluta:
+        - 2 árbitros: ambos precisam votar (2 de 2 = 100%)
+        - 3 árbitros: 2 precisam votar (2 de 3 = 66%)
+        - 4 árbitros: 3 precisam votar (3 de 4 = 75%)
+        - 5 árbitros: 3 precisam votar (3 de 5 = 60%)
+        
+        Cálculo: ceil(total_laterais / 2)
+        
         Retorna o ponto validado ou None se não houver validação.
         """
         if not self.está_ativa():
             return None
+        
+        import math
+        votos_necessarios = math.ceil(self.total_laterais / 2)
         
         # Contar votos por (cor, tipo_ponto)
         votos = {}
@@ -47,12 +60,14 @@ class CoincidenceWindow:
             for clique in cliques:
                 chave = f"{clique['cor']}_{clique['tipo']}"
                 if chave not in votos:
-                    votos[chave] = {"count": 0, "data": clique}
-                votos[chave]["count"] += 1
+                    votos[chave] = {"count": 0, "arbitros": set(), "data": clique}
+                # Contar como um voto único por árbitro (evita duplo clique do mesmo)
+                votos[chave]["arbitros"].add(lateral)
+                votos[chave]["count"] = len(votos[chave]["arbitros"])
         
-        # Verificar se há coincidência (mínimo 2 árbitros votando igual)
+        # Verificar se há maioria absoluta
         for chave, info in votos.items():
-            if info["count"] >= 2:  # Coincidência confirmada
+            if info["count"] >= votos_necessarios:  # Maioria confirmada
                 cor, tipo = chave.split("_")
                 return {
                     "cor": cor,
@@ -148,9 +163,9 @@ class JoystickManager:
         self.poomsaes_ativas: Dict[str, PoomsaeScoring] = {}
         self.conexoes_laterais: Dict[str, set] = {}  # {luta_id: {lateral_email1, lateral_email2, ...}}
     
-    def criar_janela_coincidencia(self, luta_id: str) -> CoincidenceWindow:
+    def criar_janela_coincidencia(self, luta_id: str, total_laterais: int = 2) -> CoincidenceWindow:
         """Cria uma nova janela de coincidência para uma luta"""
-        janela = CoincidenceWindow(luta_id=luta_id)
+        janela = CoincidenceWindow(luta_id=luta_id, total_laterais=total_laterais)
         self.janelas_ativas[luta_id] = janela
         return janela
     
@@ -168,26 +183,33 @@ class JoystickManager:
         return None
     
     def registrar_clique_lateral(self, luta_id: str, lateral_email: str, 
-                                 tipo_ponto: str, cor: str) -> Optional[dict]:
+                                 tipo_ponto: str, cor: str, total_laterais: int = 2) -> Optional[dict]:
         """
-        Registra clique de árbitro lateral e verifica validação.
-        Retorna ponto validado se houver coincidência.
+        Registra clique de árbitro lateral e verifica validação por MAIORIA ABSOLUTA.
+        Retorna ponto validado se houver maioria absoluta de votos de árbitros DIFERENTES.
+        
+        Args:
+            luta_id: ID da luta
+            lateral_email: Email do árbitro lateral que clicou
+            tipo_ponto: "+1", "+2" ou "+3"
+            cor: "vermelho" ou "azul"
+            total_laterais: Total de árbitros laterais para calcular maioria
         """
         # Criar janela se não existir
         if luta_id not in self.janelas_ativas:
-            self.criar_janela_coincidencia(luta_id)
+            self.criar_janela_coincidencia(luta_id, total_laterais)
         
         janela = self.janelas_ativas[luta_id]
         
         # Se janela expirou, iniciar nova
         if not janela.está_ativa():
-            self.criar_janela_coincidencia(luta_id)
+            self.criar_janela_coincidencia(luta_id, total_laterais)
             janela = self.janelas_ativas[luta_id]
         
         # Registrar clique
         janela.registrar_clique(lateral_email, tipo_ponto, cor)
         
-        # Verificar validação
+        # Verificar validação por maioria absoluta
         ponto_validado = janela.validar_ponto()
         
         if ponto_validado:
