@@ -79,6 +79,27 @@ class ConnectionManager:
                 print(f"❌ Erro ao enviar para Mesário {key}: {e}")
                 luta_id, numero_quadra = key.split(":")
                 self.disconnect_mesario(luta_id, int(numero_quadra))
+    
+    async def notificar_status_laterais(self, luta_id: str):
+        """Notifica o Mesário que o status dos laterais mudou (alguém conectou/desconectou)"""
+        # Pega lista de laterais conectados
+        laterais_conectados = list(self.active_connections.get(luta_id, {}).keys()) if luta_id in self.active_connections else []
+        
+        mensagem = {
+            "status": "laterais_atualizacao",
+            "luta_id": luta_id,
+            "laterais_conectados": laterais_conectados,
+            "total_laterais": len(laterais_conectados),
+            "timestamp": __import__('datetime').datetime.now().isoformat()
+        }
+        
+        # Enviar para TODOS os Mesários desta luta
+        for key, websocket in list(self.mesario_connections.items()):
+            if key.startswith(f"{luta_id}:"):
+                try:
+                    await websocket.send_json(mensagem)
+                except Exception as e:
+                    print(f"❌ Erro ao notificar Mesário {key}: {e}")
 
 
 # Instância global de gerenciador de conexões
@@ -109,6 +130,9 @@ async def websocket_lateral(websocket: WebSocket, luta_id: str, lateral_email: s
     try:
         await manager.connect(luta_id, lateral_email, websocket)
         print(f"✅ CONEXÃO ACEITA: lateral={lateral_email}, luta={luta_id}")
+        
+        # 🔔 NOTIFICAR O MESÁRIO QUE UM LATERAL CONECTOU
+        await manager.notificar_status_laterais(luta_id)
     except Exception as e:
         print(f"❌ ERRO AO CONECTAR: {e}")
         raise
@@ -171,6 +195,10 @@ async def websocket_lateral(websocket: WebSocket, luta_id: str, lateral_email: s
         print(f"  Luta: {luta_id}")
         print(f"{'='*60}\n")
         manager.disconnect(luta_id, lateral_email)
+        
+        # 🔔 NOTIFICAR O MESÁRIO QUE UM LATERAL DESCONECTOU
+        import asyncio
+        asyncio.create_task(manager.notificar_status_laterais(luta_id))
     except Exception as e:
         print(f"\n{'='*60}")
         print(f"❌ ERRO INESPERADO NO WEBSOCKET LATERAL")
@@ -181,6 +209,10 @@ async def websocket_lateral(websocket: WebSocket, luta_id: str, lateral_email: s
         print(f"  Luta: {luta_id}")
         print(f"{'='*60}\n")
         manager.disconnect(luta_id, lateral_email)
+        
+        # 🔔 NOTIFICAR O MESÁRIO QUE UM LATERAL FOI DESCONECTADO (POR ERRO)
+        import asyncio
+        asyncio.create_task(manager.notificar_status_laterais(luta_id))
         raise
 
 
