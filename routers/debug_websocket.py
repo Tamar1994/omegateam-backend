@@ -2,7 +2,7 @@
 Endpoint de teste para WebSocket - ULTRA DEBUG
 Objetivo: Descobrir exatamente onde está falhando
 """
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Status
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 import json
 import sys
 import traceback
