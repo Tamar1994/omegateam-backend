@@ -287,7 +287,7 @@ async def status_poomsae(luta_id: str, db: AsyncIOMotorDatabase = Depends(get_db
 async def conexoes_ativas(luta_id: str, db: AsyncIOMotorDatabase = Depends(get_db)):
     """Lista árbitros laterais conectados a uma luta"""
     if luta_id not in manager.active_connections:
-        return {"luta_id": luta_id, "laterais_conectados": []}
+        return {"luta_id": luta_id, "laterais_conectado": []}
     
     laterais = list(manager.active_connections[luta_id].keys())
     
@@ -295,4 +295,22 @@ async def conexoes_ativas(luta_id: str, db: AsyncIOMotorDatabase = Depends(get_d
         "luta_id": luta_id,
         "laterais_conectados": laterais,
         "total": len(laterais)
+    }
+
+
+@router.get("/joystick/health")
+async def joystick_health():
+    """Health check para o sistema de WebSocket do Joystick"""
+    return {
+        "status": "ok",
+        "mensagem": "Sistema de Joystick está pronto para WebSocket",
+        "websocket_endpoints": [
+            "/api/ws/lateral/{luta_id}/{lateral_email}",
+            "/api/ws/mesario/{luta_id}/{numero_quadra}",
+            "/api/ws/poomsae/{luta_id}/{juiz_email}"
+        ],
+        "conexoes_ativas": {
+            "laterais": sum(len(emails) for emails in manager.active_connections.values()),
+            "mesarios": len(manager.mesario_connections)
+        }
     }
