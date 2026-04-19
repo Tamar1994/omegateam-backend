@@ -177,10 +177,10 @@ async def websocket_lateral(websocket: WebSocket, campeonato_id: str, lateral_em
     
     try:
         await manager.connect(campeonato_id, lateral_email, websocket)
-        print(f"✅ CONEXÃO ACEITA: lateral={lateral_email}, luta={luta_id}")
+        print(f"✅ CONEXÃO ACEITA: lateral={lateral_email}, campeonato={campeonato_id}")
         
         # 🔔 NOTIFICAR O MESÁRIO QUE UM LATERAL CONECTOU
-        await manager.notificar_status_laterais(luta_id)
+        await manager.notificar_status_laterais(campeonato_id)
     except Exception as e:
         print(f"❌ ERRO AO CONECTAR: {e}")
         raise
