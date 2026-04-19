@@ -101,6 +101,38 @@ class ConnectionManager:
                 except Exception as e:
                     print(f"❌ Erro ao notificar Mesário {key}: {e}")
 
+    async def notificar_luta_iniciada(self, luta_id: str, luta_data: dict):
+        """
+        🎬 Notifica TODOS os laterais sobre luta iniciada
+        
+        Envia:
+        {
+            "status": "luta_iniciada",
+            "luta_id": luta_id,
+            "modalidade": "Kyorugui" ou "Poomsae",
+            "atleta_vermelho": "Nome",
+            "atleta_azul": "Nome",
+            "timestamp": ISO
+        }
+        """
+        mensagem = {
+            "status": "luta_iniciada",
+            "luta_id": luta_id,
+            "modalidade": luta_data.get("modalidade", "Kyorugui"),
+            "atleta_vermelho": luta_data.get("atleta_vermelho", "Atleta 1"),
+            "atleta_azul": luta_data.get("atleta_azul", "Atleta 2"),
+            "timestamp": __import__('datetime').datetime.now().isoformat()
+        }
+
+        # Enviar para TODOS os laterais desta luta
+        if luta_id in self.active_connections:
+            for lateral_email, websocket in list(self.active_connections[luta_id].items()):
+                try:
+                    print(f"  📤 Enviando luta_iniciada para {lateral_email}...")
+                    await websocket.send_json(mensagem)
+                except Exception as e:
+                    print(f"❌ Erro ao notificar lateral {lateral_email}: {e}")
+
 
 # Instância global de gerenciador de conexões
 manager = ConnectionManager()
@@ -422,3 +454,43 @@ async def joystick_health():
             "URL deve usar wss:// em produção (Render com https)"
         ]
     }
+
+
+@router.post("/lutas/{luta_id}/notificar-laterais")
+async def notificar_laterais_luta_iniciada(luta_id: str, dados: dict, db: AsyncIOMotorDatabase = Depends(get_db)):
+    """
+    🎬 Notifica todos os laterais que a luta iniciou
+    
+    Chamado pelo Mesário quando puxa a próxima luta.
+    Envia modalidade (Kyorugui/Poomsae) e dados do atletas para lateral renderizar joystick correto.
+    """
+    print(f"\n{'='*60}")
+    print(f"🎬 NOTIFICANDO LATERAIS SOBRE LUTA INICIADA")
+    print(f"{'='*60}")
+    print(f"  Luta ID: {luta_id}")
+    print(f"  Dados: {dados}")
+    
+    try:
+        # Prepara dados da luta para enviar
+        luta_data = {
+            "modalidade": dados.get("modalidade", "Kyorugui"),
+            "atleta_vermelho": dados.get("atleta_vermelho", "Atleta 1"),
+            "atleta_azul": dados.get("atleta_azul", "Atleta 2")
+        }
+        
+        # Notifica todos os laterais conectados
+        await manager.notificar_luta_iniciada(luta_id, luta_data)
+        
+        print(f"✅ Notificação enviada para laterais")
+        print(f"{'='*60}\n")
+        
+        return {
+            "status": "sucesso",
+            "mensagem": "Laterais notificados sobre luta iniciada",
+            "luta_id": luta_id,
+            "luta_data": luta_data
+        }
+    except Exception as e:
+        print(f"❌ ERRO ao notificar laterais: {e}")
+        print(f"{'='*60}\n")
+        raise HTTPException(status_code=500, detail=f"Erro ao notificar laterais: {str(e)}")

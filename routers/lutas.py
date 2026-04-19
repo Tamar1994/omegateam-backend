@@ -282,6 +282,29 @@ async def obter_luta_atual(camp_id: str, num_quadra: int, db: AsyncIOMotorDataba
     return luta
 
 
+@router.get("/campeonatos/{camp_id}/quadras/{num_quadra}/proxima-luta")
+async def obter_proxima_luta(camp_id: str, num_quadra: int, db: AsyncIOMotorDatabase = Depends(get_db)):
+    """
+    Obtém a próxima luta para o mesário puxar.
+    Retorna a primeira luta com status "Pendente" ou "Não Iniciada"
+    """
+    # Busca primeira luta sem status definido ou com status "Pendente"
+    luta = await db.lutas.find_one({
+        "campeonato_id": camp_id,
+        "quadra": num_quadra,
+        "$or": [
+            {"status": {"$exists": False}},
+            {"status": {"$in": ["Pendente", "Não Iniciada", None]}}
+        ]
+    }).sort("ordem_luta", 1)  # Ordem cronológica
+    
+    if not luta:
+        raise HTTPException(status_code=404, detail="Nenhuma luta pendente para esta quadra.")
+    
+    luta["_id"] = str(luta["_id"])
+    return luta
+
+
 @router.put("/lutas/{luta_id}/finalizar")
 async def finalizar_luta_banco(luta_id: str, dados: FinalizarLutaData):
     """Finaliza uma luta e salva os resultados"""
