@@ -3,6 +3,7 @@ Rotas de Lutas (Geração de Chaves, Cronograma, Lutas)
 """
 import math
 import random
+import string
 from fastapi import APIRouter, HTTPException, Depends
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from datetime import datetime, timedelta
@@ -13,6 +14,13 @@ from config.settings import POOMSAES_WT
 from database.connection import get_db
 
 router = APIRouter(prefix="/api", tags=["Lutas"])
+
+
+def gerar_token_scoreboard():
+    """Gera um token único para acesso ao Scoreboard no formato XXXX-XXXX"""
+    parte1 = ''.join(random.choices(string.ascii_uppercase + string.digits, k=4))
+    parte2 = ''.join(random.choices(string.ascii_uppercase + string.digits, k=4))
+    return f"{parte1}-{parte2}"
 
 
 @router.post("/campeonatos/{camp_id}/gerar-chaves")
@@ -321,13 +329,93 @@ async def obter_proxima_luta(camp_id: str, num_quadra: str, db: AsyncIOMotorData
         }}
     )
     
+    # 📺 GERAR TOKEN PARA SCOREBOARD
+    token_scoreboard = gerar_token_scoreboard()
+    await db.scoreboard_tokens.insert_one({
+        "_id": token_scoreboard,
+        "luta_id": str(luta["_id"]),
+        "campeonato_id": camp_id,
+        "numero_quadra": num_quadra_int,
+        "data_criacao": datetime.utcnow(),
+        "utilizado": False,
+        "data_utilizacao": None,
+        "ip_acesso": None
+    })
+    print(f"📺 Token Scoreboard gerado: {token_scoreboard} para luta {luta['_id']}")
+    
     # Buscar novamente para retornar com dados atualizados
     luta_atualizada = await db.lutas.find_one({"_id": luta["_id"]})
     luta_atualizada["_id"] = str(luta_atualizada["_id"])
+    luta_atualizada["token_scoreboard"] = token_scoreboard  # ✅ Retornar o token
     return luta_atualizada
 
 
-@router.put("/lutas/{luta_id}/finalizar")
+@router.get("/scoreboard/access/{token}")
+async def validar_token_scoreboard(token: str, db: AsyncIOMotorDatabase = Depends(get_db)):
+    """
+    Valida token de acesso ao Scoreboard.
+    Retorna dados da luta ou erro se token inválido/já utilizado.
+    Token é marcado como utilizado após primeira utilização.
+    """
+    # Procurar token
+    token_doc = await db.scoreboard_tokens.find_one({"_id": token})
+    
+    if not token_doc:
+        raise HTTPException(status_code=401, detail="Token inválido")
+    
+    # Verificar se já foi utilizado
+    if token_doc.get("utilizado"):
+        raise HTTPException(status_code=401, detail="Token já foi utilizado")
+    
+    # Marcar como utilizado
+    await db.scoreboard_tokens.update_one(
+        {"_id": token},
+        {"$set": {
+            "utilizado": True,
+            "data_utilizacao": datetime.utcnow()
+        }}
+    )
+    
+    # Buscar luta
+    try:
+        luta = await db.lutas.find_one({"_id": ObjectId(token_doc["luta_id"])})
+    except:
+        luta = await db.lutas.find_one({"_id": token_doc["luta_id"]})
+    
+    if not luta:
+        raise HTTPException(status_code=404, detail="Luta não encontrada")
+    
+    return {
+        "acesso_autorizado": True,
+        "luta_id": str(luta["_id"]),
+        "campeonato_id": token_doc["campeonato_id"],
+        "numero_quadra": token_doc["numero_quadra"],
+        "mensagem": "Acesso autorizado ao Scoreboard"
+    }
+
+
+@router.get("/lutas/{luta_id}/luta-atual")
+async def obter_luta_atual(luta_id: str, db: AsyncIOMotorDatabase = Depends(get_db)):
+    """
+    Obtém dados da luta atual para o Scoreboard.
+    Usa o endpoint já existente em campeonatos.
+    """
+    try:
+        luta = await db.lutas.find_one({
+            "_id": ObjectId(luta_id),
+            "status": "Em Andamento"
+        })
+    except:
+        luta = await db.lutas.find_one({
+            "_id": luta_id,
+            "status": "Em Andamento"
+        })
+    
+    if not luta:
+        raise HTTPException(status_code=404, detail="Luta não encontrada")
+    
+    luta["_id"] = str(luta["_id"])
+    return luta
 async def finalizar_luta_banco(luta_id: str, dados: FinalizarLutaData, db: AsyncIOMotorDatabase = Depends(get_db)):
     """Finaliza uma luta e salva os resultados"""
     resultado = await db.lutas.update_one(
