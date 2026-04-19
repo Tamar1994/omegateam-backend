@@ -423,12 +423,20 @@ async def sortear_poomsaes_campeonato(camp_id: str, db: AsyncIOMotorDatabase = D
     return {"mensagem": f"Sorteio concluído! {atualizados} chaves atualizadas com os Poomsaes oficiais."}
 
 
-@router.get("/scoreboard/quadra/{numero_quadra}/luta-atual")
-async def obter_luta_atual_quadra(numero_quadra: int, db: AsyncIOMotorDatabase = Depends(get_db)):
+@router.get("/scoreboard/luta-atual")
+async def obter_luta_atual_por_token(token: str, db: AsyncIOMotorDatabase = Depends(get_db)):
     """
-    Obtém a luta atual de uma quadra para o Scoreboard exibir.
-    Retorna a luta em andamento ou null se não houver luta.
+    Obtém a luta atual de uma quadra usando o token.
+    Token é validado e extrai campeonato_id + numero_quadra.
     """
+    # Procurar quadra pelo token
+    quadra = await db.quadras.find_one({"token_scoreboard": token})
+    
+    if not quadra:
+        raise HTTPException(status_code=401, detail="Token inválido")
+    
+    numero_quadra = quadra["numero_quadra"]
+    
     try:
         luta = await db.lutas.find_one({
             "quadra": numero_quadra,
@@ -438,16 +446,22 @@ async def obter_luta_atual_quadra(numero_quadra: int, db: AsyncIOMotorDatabase =
         if not luta:
             return {
                 "luta": None,
+                "numero_quadra": numero_quadra,
+                "campeonato_id": quadra["campeonato_id"],
                 "mensagem": "Aguardando próxima luta"
             }
         
         luta["_id"] = str(luta["_id"])
         return {
             "luta": luta,
+            "numero_quadra": numero_quadra,
+            "campeonato_id": quadra["campeonato_id"],
             "mensagem": "Luta em andamento"
         }
     except Exception as e:
         return {
             "luta": None,
+            "numero_quadra": numero_quadra,
+            "campeonato_id": quadra["campeonato_id"],
             "mensagem": f"Erro ao buscar luta: {str(e)}"
         }
