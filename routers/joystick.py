@@ -155,7 +155,7 @@ manager = ConnectionManager()
 
 
 @router.websocket("/ws/lateral/{campeonato_id}/{lateral_email}")
-async def websocket_lateral(websocket: WebSocket, campeonato_id: str, lateral_email: str):
+async def websocket_lateral(websocket: WebSocket, campeonato_id: str, lateral_email: str, db: AsyncIOMotorDatabase = Depends(get_db)):
     """
     WebSocket para árbitro lateral enviar pontos e receber confirmações.
     
@@ -206,15 +206,55 @@ async def websocket_lateral(websocket: WebSocket, campeonato_id: str, lateral_em
                 print(f"✋ LATERAL MARCANDO COMO PRONTO")
                 print(f"{'='*60}")
                 print(f"  Email: {lateral_email}")
-                print(f"  Luta ID: {luta_id}")
+                print(f"  Campeonato: {campeonato_id}")
                 print(f"  Timestamp: {data.get('timestamp')}")
-                # Aqui poderia marcar no banco, mas por enquanto é só feedback
-                await websocket.send_json({
-                    "status": "pronto_confirmado",
-                    "mensagem": "Você está pronto para a luta!",
-                    "timestamp": data.get("timestamp")
+                
+                # 🔍 Procurar qual quadra tem este lateral
+                quadra = await db.quadras.find_one({
+                    "campeonato_id": campeonato_id,
+                    "$or": [
+                        {"lateral1_email": lateral_email},
+                        {"lateral2_email": lateral_email},
+                        {"lateral3_email": lateral_email},
+                        {"lateral4_email": lateral_email},
+                        {"lateral5_email": lateral_email}
+                    ]
                 })
-                print(f"{'='*60}\n")
+                
+                if quadra:
+                    # 🎯 Encontrar qual slot (1-5) este lateral ocupa
+                    numero_quadra = quadra.get("numero_quadra")
+                    lateral_slot = None
+                    for i in range(1, 6):
+                        if quadra.get(f"lateral{i}_email") == lateral_email:
+                            lateral_slot = i
+                            break
+                    
+                    if lateral_slot:
+                        # ✅ Atualizar no banco: lateral{N}_ready = true
+                        await db.quadras.update_one(
+                            {"campeonato_id": campeonato_id, "numero_quadra": numero_quadra},
+                            {"$set": {f"lateral{lateral_slot}_ready": True}}
+                        )
+                        print(f"  ✅ Marcado como pronto: lateral{lateral_slot} na quadra {numero_quadra}")
+                        print(f"{'='*60}\n")
+                        
+                        # 📡 Notificar Mesário que status mudou
+                        asyncio.create_task(manager.notificar_status_laterais(campeonato_id))
+                        
+                        # ✅ Confirmar para o lateral
+                        await websocket.send_json({
+                            "status": "pronto_confirmado",
+                            "mensagem": "Você está pronto para a luta!",
+                            "timestamp": data.get("timestamp")
+                        })
+                    else:
+                        print(f"  ❌ Não encontrou qual slot o lateral ocupa")
+                        print(f"{'='*60}\n")
+                else:
+                    print(f"  ❌ Nenhuma quadra encontrada com este lateral")
+                    print(f"{'='*60}\n")
+                
                 continue
             
             # Validar dados para pontos
