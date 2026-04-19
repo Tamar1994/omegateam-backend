@@ -90,6 +90,7 @@ async def websocket_lateral(websocket: WebSocket, luta_id: str, lateral_email: s
     4. Se houver coincidência (2+ árbitros), ponto é validado
     5. Confirmação é enviada de volta para todos os laterais
     """
+    print(f"🔌 Tentativa de conexão lateral: luta_id={luta_id}, lateral_email={lateral_email}")
     await manager.connect(luta_id, lateral_email, websocket)
     
     try:
@@ -225,6 +226,7 @@ async def websocket_mesario(websocket: WebSocket, luta_id: str, numero_quadra: i
     3. Quando um ponto é validado pela Coincidence Window, recebe notificação
     4. Atualiza automaticamente o placar
     """
+    print(f"🔌 Tentativa de conexão mesário: luta_id={luta_id}, numero_quadra={numero_quadra}")
     await manager.connect_mesario(luta_id, numero_quadra, websocket)
     
     try:
@@ -237,6 +239,7 @@ async def websocket_mesario(websocket: WebSocket, luta_id: str, numero_quadra: i
                 await websocket.send_json({"tipo": "pong"})
     
     except WebSocketDisconnect:
+        print(f"❌ Mesário desconectado: luta_id={luta_id}, numero_quadra={numero_quadra}")
         manager.disconnect_mesario(luta_id, numero_quadra)
 
 
