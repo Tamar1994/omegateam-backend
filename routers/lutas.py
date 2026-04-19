@@ -289,18 +289,21 @@ async def obter_proxima_luta(camp_id: str, num_quadra: int, db: AsyncIOMotorData
     Retorna a primeira luta com status "Pendente" ou "Não Iniciada"
     """
     # Busca primeira luta sem status definido ou com status "Pendente"
-    luta = await db.lutas.find_one({
+    lutas_cursor = db.lutas.find({
         "campeonato_id": camp_id,
         "quadra": num_quadra,
         "$or": [
             {"status": {"$exists": False}},
             {"status": {"$in": ["Pendente", "Não Iniciada", None]}}
         ]
-    }).sort("ordem_luta", 1)  # Ordem cronológica
+    }).sort("ordem_luta", 1).limit(1)  # Ordem cronológica
     
-    if not luta:
+    lutas = await lutas_cursor.to_list(length=1)
+    
+    if not lutas:
         raise HTTPException(status_code=404, detail="Nenhuma luta pendente para esta quadra.")
     
+    luta = lutas[0]
     luta["_id"] = str(luta["_id"])
     return luta
 

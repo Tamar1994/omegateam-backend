@@ -171,10 +171,26 @@ async def websocket_lateral(websocket: WebSocket, luta_id: str, lateral_email: s
     
     try:
         while True:
-            # Receber clique do lateral
+            # Receber mensagem do lateral
             data = await websocket.receive_json()
             
-            # Validar dados
+            # ✋ HANDLER: Lateral marca como pronto
+            if data.get("tipo") == "lateral_pronto":
+                print(f"\n{'='*60}")
+                print(f"✋ LATERAL MARCANDO COMO PRONTO")
+                print(f"{'='*60}")
+                print(f"  Email: {lateral_email}")
+                print(f"  Timestamp: {data.get('timestamp')}")
+                # Aqui poderia marcar no banco, mas por enquanto é só feedback
+                await websocket.send_json({
+                    "status": "pronto_confirmado",
+                    "mensagem": "Você está pronto para a luta!",
+                    "timestamp": data.get("timestamp")
+                })
+                print(f"{'='*60}\n")
+                continue
+            
+            # Validar dados para pontos
             if "tipo_ponto" not in data or "cor" not in data:
                 await websocket.send_json({
                     "status": "erro",
