@@ -115,6 +115,17 @@ class ConnectionManager:
             "timestamp": ISO
         }
         """
+        print(f"\n{'='*60}")
+        print(f"🎬 NOTIFICANDO LATERAIS - LUTA INICIADA")
+        print(f"{'='*60}")
+        print(f"  Campeonato ID: {campeonato_id}")
+        print(f"  Luta Data: {luta_data}")
+        
+        # Verificar conexões ativas
+        laterais_conectados = list(self.active_connections.get(campeonato_id, {}).keys()) if campeonato_id in self.active_connections else []
+        print(f"  Laterais conectados neste campeonato: {laterais_conectados}")
+        print(f"  Total: {len(laterais_conectados)}")
+        
         mensagem = {
             "status": "luta_iniciada",
             "luta_id": luta_data.get("luta_id"),
@@ -130,8 +141,13 @@ class ConnectionManager:
                 try:
                     print(f"  📤 Enviando luta_iniciada para {lateral_email}...")
                     await websocket.send_json(mensagem)
+                    print(f"  ✅ Enviado com sucesso para {lateral_email}")
                 except Exception as e:
-                    print(f"❌ Erro ao notificar lateral {lateral_email}: {e}")
+                    print(f"  ❌ Erro ao notificar lateral {lateral_email}: {e}")
+        else:
+            print(f"  ⚠️ Nenhuma conexão ativa para campeonato {campeonato_id}")
+        
+        print(f"{'='*60}\n")
 
 
 # Instância global de gerenciador de conexões
