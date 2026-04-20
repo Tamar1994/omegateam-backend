@@ -38,21 +38,21 @@ class CoincidenceWindow:
         """
         Valida se há MAIORIA ABSOLUTA de votos entre árbitros (árbitros DIFERENTES).
         
-        Maioria Absoluta:
+        Maioria Absoluta (Mais de 50%):
         - 2 árbitros: ambos precisam votar (2 de 2 = 100%)
         - 3 árbitros: 2 precisam votar (2 de 3 = 66%)
         - 4 árbitros: 3 precisam votar (3 de 4 = 75%)
         - 5 árbitros: 3 precisam votar (3 de 5 = 60%)
         
-        Cálculo: ceil(total_laterais / 2)
-        
-        Retorna o ponto validado ou None se não houver validação.
+        Cálculo: (total_laterais // 2) + 1
         """
         if not self.está_ativa():
             return None
         
-        import math
-        votos_necessarios = math.ceil(self.total_laterais / 2)
+        # ✅ CORREÇÃO: Maioria absoluta = mais de 50%
+        # Com 2 árbitros: (2 // 2) + 1 = 2 (ambos precisam)
+        # Com 3 árbitros: (3 // 2) + 1 = 2 (maioria de 3)
+        votos_necessarios = (self.total_laterais // 2) + 1
         
         # Contar votos por (cor, tipo_ponto)
         votos = {}
