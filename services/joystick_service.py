@@ -433,7 +433,7 @@ class JoystickManager:
         return response
     
     def obter_status_poomsae(self, luta_id: str) -> dict:
-        """Obtém status atual de uma sessão de Poomsae (incompleta)"""
+        """Obtém status atual de uma sessão de Poomsae (incompleta) com notas intermediárias"""
         if luta_id not in self.poomsaes_ativas:
             return {
                 "status": "nao_existe",
@@ -449,17 +449,65 @@ class JoystickManager:
         apresentacao_vermelho = len(sessao.apresentacao_por_atleta.get("vermelho", {}))
         apresentacao_azul = len(sessao.apresentacao_por_atleta.get("azul", {}))
         
+        # Calcular médias intermediárias
+        def calcular_media_notas(valores_dict):
+            """Calcula média das notas recebidas até agora"""
+            if not valores_dict:
+                return None
+            valores = list(valores_dict.values())
+            return sessao.calcular_media_por_quesito(valores)
+        
+        accuracy_media_vermelho = calcular_media_notas(sessao.accuracy_por_atleta.get("vermelho", {}))
+        accuracy_media_azul = calcular_media_notas(sessao.accuracy_por_atleta.get("azul", {}))
+        
+        # Para apresentação, calcular média por quesito
+        def calcular_media_apresentacao(apresentacoes_dict):
+            """Calcula média de apresentação dos quesitos"""
+            if not apresentacoes_dict:
+                return None
+            
+            apresentacoes = list(apresentacoes_dict.values())
+            velocidade_vals = [ap.get("velocidade", 0) for ap in apresentacoes]
+            ritmo_vals = [ap.get("ritmo", 0) for ap in apresentacoes]
+            expressao_vals = [ap.get("expressao", 0) for ap in apresentacoes]
+            
+            velocidade_media = sessao.calcular_media_por_quesito(velocidade_vals)
+            ritmo_media = sessao.calcular_media_por_quesito(ritmo_vals)
+            expressao_media = sessao.calcular_media_por_quesito(expressao_vals)
+            
+            return {
+                "velocidade": velocidade_media,
+                "ritmo": ritmo_media,
+                "expressao": expressao_media,
+                "total": velocidade_media + ritmo_media + expressao_media
+            }
+        
+        apresentacao_media_vermelho = calcular_media_apresentacao(sessao.apresentacao_por_atleta.get("vermelho", {}))
+        apresentacao_media_azul = calcular_media_apresentacao(sessao.apresentacao_por_atleta.get("azul", {}))
+        
         return {
-            "status": "incompleto",
+            "status": "em_progresso",
             "luta_id": luta_id,
             "numero_juizes": sessao.numero_juizes,
             "accuracy": {
-                "vermelho": f"{accuracy_vermelho}/{sessao.numero_juizes}",
-                "azul": f"{accuracy_azul}/{sessao.numero_juizes}"
+                "vermelho": {
+                    "votos": f"{accuracy_vermelho}/{sessao.numero_juizes}",
+                    "media": accuracy_media_vermelho
+                },
+                "azul": {
+                    "votos": f"{accuracy_azul}/{sessao.numero_juizes}",
+                    "media": accuracy_media_azul
+                }
             },
             "apresentacao": {
-                "vermelho": f"{apresentacao_vermelho}/{sessao.numero_juizes}",
-                "azul": f"{apresentacao_azul}/{sessao.numero_juizes}"
+                "vermelho": {
+                    "votos": f"{apresentacao_vermelho}/{sessao.numero_juizes}",
+                    "media": apresentacao_media_vermelho
+                },
+                "azul": {
+                    "votos": f"{apresentacao_azul}/{sessao.numero_juizes}",
+                    "media": apresentacao_media_azul
+                }
             },
             "todos_completos": sessao.todas_notas_recebidas(),
             "tempo_restante_segundos": max(0, sessao.timeout_segundos - 
