@@ -11,6 +11,7 @@ from models.luta import GerarChavesData, FinalizarLutaData, LateralReadyData
 from models.campeonato import ConfigCronograma
 from config.settings import POOMSAES_WT
 from database.connection import get_db
+from routers.joystick import manager  # Import para notificar Live
 
 router = APIRouter(prefix="/api", tags=["Lutas"])
 
@@ -386,6 +387,12 @@ async def obter_luta_atual(luta_id: str, db: AsyncIOMotorDatabase = Depends(get_
     return luta
 async def finalizar_luta_banco(luta_id: str, dados: FinalizarLutaData, db: AsyncIOMotorDatabase = Depends(get_db)):
     """Finaliza uma luta e salva os resultados"""
+    
+    # Buscar dados atuais da luta para fazer broadcast
+    luta_atual = await db.lutas.find_one({"_id": ObjectId(luta_id)})
+    if not luta_atual:
+        raise HTTPException(status_code=404, detail="Luta não encontrada.")
+    
     resultado = await db.lutas.update_one(
         {"_id": ObjectId(luta_id)},
         {"$set": {
@@ -400,6 +407,13 @@ async def finalizar_luta_banco(luta_id: str, dados: FinalizarLutaData, db: Async
     
     if resultado.matched_count == 0:
         raise HTTPException(status_code=404, detail="Luta não encontrada.")
+    
+    # 📺 NOTIFICAR LIVE QUE LUTA FOI ENCERRADA
+    campeonato_id = luta_atual.get("campeonato_id")
+    if campeonato_id:
+        luta_atualizada = await db.lutas.find_one({"_id": ObjectId(luta_id)})
+        await manager.broadcast_luta_update(campeonato_id, luta_atualizada)
+        print(f"📺 Live notificado: Luta {luta_id} encerrada")
         
     return {"mensagem": "Luta encerrada salva no banco!"}
 

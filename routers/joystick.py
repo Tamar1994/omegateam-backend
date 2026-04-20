@@ -16,6 +16,7 @@ class ConnectionManager:
     def __init__(self):
         self.active_connections: dict = {}  # {campeonato_id: {lateral_email: websocket}}
         self.mesario_connections: dict = {}  # {luta_id: websocket}
+        self.live_connections: dict = {}  # {campeonato_id: [websocket1, websocket2, ...]} para Live.jsx
     
     async def connect(self, campeonato_id: str, lateral_email: str, websocket: WebSocket):
         """Conecta um árbitro lateral ao WebSocket"""
@@ -149,6 +150,64 @@ class ConnectionManager:
             print(f"  ⚠️ Nenhuma conexão ativa para campeonato {campeonato_id}")
         
         print(f"{'='*60}\n")
+
+
+    async def connect_live(self, campeonato_id: str, websocket: WebSocket):
+        """Conecta um cliente Live (TV, display, etc) ao WebSocket"""
+        await websocket.accept()
+        
+        if campeonato_id not in self.live_connections:
+            self.live_connections[campeonato_id] = []
+        
+        self.live_connections[campeonato_id].append(websocket)
+        print(f"✅ LIVE CONECTADO: campeonato {campeonato_id} (Total: {len(self.live_connections[campeonato_id])})")
+    
+    def disconnect_live(self, campeonato_id: str, websocket: WebSocket):
+        """Desconecta um cliente Live"""
+        if campeonato_id in self.live_connections:
+            if websocket in self.live_connections[campeonato_id]:
+                self.live_connections[campeonato_id].remove(websocket)
+            
+            if not self.live_connections[campeonato_id]:
+                del self.live_connections[campeonato_id]
+        
+        print(f"❌ LIVE desconectado do campeonato {campeonato_id}")
+    
+    async def broadcast_luta_update(self, campeonato_id: str, luta_data: dict):
+        """
+        Envia atualização de status de luta para TODOS os clientes Live
+        
+        Envia:
+        {
+            "tipo": "luta_atualizada",
+            "luta_id": luta_id,
+            "status": "Em Andamento" | "Aguardando Chamada" | "Encerrada",
+            "placar": {...},
+            "timestamp": ISO
+        }
+        """
+        mensagem = {
+            "tipo": "luta_atualizada",
+            "luta_id": luta_data.get("_id"),
+            "status": luta_data.get("status"),
+            "placar": {
+                "red_pontos": luta_data.get("pontos_vermelho", 0),
+                "blue_pontos": luta_data.get("pontos_azul", 0),
+                "red_faltas": luta_data.get("faltas_vermelho", 0),
+                "blue_faltas": luta_data.get("faltas_azul", 0),
+                "round": luta_data.get("round", 1),
+                "turno_poomsae": luta_data.get("turno_poomsae")
+            },
+            "timestamp": __import__('datetime').datetime.now().isoformat()
+        }
+        
+        if campeonato_id in self.live_connections:
+            for websocket in list(self.live_connections[campeonato_id]):
+                try:
+                    await websocket.send_json(mensagem)
+                except Exception as e:
+                    print(f"❌ Erro ao enviar para Live {campeonato_id}: {e}")
+                    self.disconnect_live(campeonato_id, websocket)
 
 
 # Instância global de gerenciador de conexões
@@ -876,6 +935,40 @@ async def conexoes_ativas(luta_id: str, db: AsyncIOMotorDatabase = Depends(get_d
     }
 
 
+# ===== WEBSOCKET PARA LIVE (TV/DISPLAYS) =====
+
+@router.websocket("/ws/live/{campeonato_id}")
+async def websocket_live(websocket: WebSocket, campeonato_id: str):
+    """
+    WebSocket para Live.jsx - recebe atualizações em tempo real de mudanças de status de lutas
+    
+    Fluxo:
+    1. Cliente Live (TV, display) conecta ao WebSocket
+    2. Backend envia atualizações quando status de luta muda
+    3. Live.jsx atualiza a tela em tempo real sem polling
+    """
+    try:
+        await manager.connect_live(campeonato_id, websocket)
+        
+        while True:
+            # Aguarda mensagens do cliente (pode ser heartbeat ou refresh request)
+            try:
+                data = await websocket.receive_json()
+                
+                if data.get("tipo") == "refresh_request":
+                    # Cliente solicitou refresh completo - aqui ele deveria fazer HTTP GET
+                    print(f"📺 Live {campeonato_id} solicitou refresh")
+                    
+            except Exception as e:
+                # Se receber texto em vez de JSON (heartbeat), apenas ignora
+                pass
+                
+    except Exception as e:
+        print(f"❌ Erro no WebSocket Live: {e}")
+    finally:
+        manager.disconnect_live(campeonato_id, websocket)
+
+
 @router.get("/joystick/health")
 async def joystick_health():
     """Health check para o sistema de WebSocket do Joystick"""
@@ -894,7 +987,8 @@ async def joystick_health():
         "websocket_endpoints": [
             "/api/ws/lateral/{luta_id}/{lateral_email}",
             "/api/ws/mesario/{luta_id}/{numero_quadra}",
-            "/api/ws/poomsae/{luta_id}/{juiz_email}"
+            "/api/ws/poomsae/{luta_id}/{juiz_email}",
+            "/api/ws/live/{campeonato_id}"
         ],
         "conexoes_ativas": {
             "laterais": sum(len(emails) for emails in manager.active_connections.values()),
