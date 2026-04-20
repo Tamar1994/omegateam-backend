@@ -476,7 +476,7 @@ async def websocket_poomsae(websocket: WebSocket, luta_id: str, juiz_email: str)
         if resultado_apre["status"] == "completo":
             relatorio = resultado_apre.get("relatorio", {})
             
-            await websocket.send_json({
+            resultado_final_msg = {
                 "tipo": "poomsae_resultado_final",
                 "status": "resultado_final",
                 "resultado_final": {
@@ -488,7 +488,13 @@ async def websocket_poomsae(websocket: WebSocket, luta_id: str, juiz_email: str)
                     "vencedor": relatorio.get("vencedor")
                 },
                 "mensagem": f"Poomsae completo! Vencedor: {relatorio.get('vencedor')}"
-            })
+            }
+            
+            # Enviar para este juiz (confirmação)
+            await websocket.send_json(resultado_final_msg)
+            
+            # 📢 BROADCAST para TODOS os Mesários conectados
+            await broadcast_poomsae_resultado(luta_id, resultado_final_msg)
         else:
             # Aguardando outros juízes
             await websocket.send_json({
@@ -705,6 +711,114 @@ async def websocket_mesario(websocket: WebSocket, luta_id: str, numero_quadra: i
         print(f"{'='*60}\n")
         manager.disconnect_mesario(luta_id, numero_quadra)
         manager.disconnect_mesario(luta_id, numero_quadra)
+
+
+# ========================================
+# WEBSOCKET PARA MESÁRIO - POOMSAE
+# ========================================
+# Novo storage para Mesários conectados ao Poomsae
+poomsae_mesario_connections: dict = {}  # {luta_id: [websocket1, websocket2, ...]}
+
+@router.websocket("/ws/mesario/{luta_id}")
+async def websocket_mesario_poomsae(websocket: WebSocket, luta_id: str):
+    """
+    WebSocket para Mesário receber resultados de Poomsae em tempo real.
+    
+    Fluxo:
+    1. Mesário conecta ao WebSocket
+    2. Aguarda resultados do Poomsae quando todos os juízes submetem
+    3. Quando resultado está completo, recebe: poomsae_resultado_final
+    4. Atualiza automaticamente o placar
+    """
+    print(f"\n{'='*60}")
+    print(f"🔌 WEBSOCKET MESÁRIO POOMSAE - TENTATIVA DE CONEXÃO")
+    print(f"{'='*60}")
+    print(f"  Hora: {__import__('datetime').datetime.now().isoformat()}")
+    print(f"  Luta ID: {luta_id}")
+    print(f"  Headers: {dict(websocket.headers)}")
+    print(f"{'='*60}\n")
+    
+    try:
+        await websocket.accept()
+        
+        # Adicionar à lista de Mesários conectados para este Poomsae
+        if luta_id not in poomsae_mesario_connections:
+            poomsae_mesario_connections[luta_id] = []
+        
+        poomsae_mesario_connections[luta_id].append(websocket)
+        print(f"✅ MESÁRIO POOMSAE CONECTADO à luta {luta_id}")
+        print(f"   Mesários conectados: {len(poomsae_mesario_connections[luta_id])}")
+        
+        # Enviar confirmação de conexão
+        await websocket.send_json({
+            "tipo": "mesario_poomsae_conectado",
+            "luta_id": luta_id,
+            "mensagem": "Conectado! Aguardando resultados do Poomsae..."
+        })
+        
+        # Manter conexão aberta
+        while True:
+            data = await websocket.receive_json()
+            
+            # Se receber "ping", responder com "pong"
+            if data.get("tipo") == "ping":
+                await websocket.send_json({"tipo": "pong"})
+    
+    except WebSocketDisconnect:
+        print(f"\n{'='*60}")
+        print(f"❌ WEBSOCKET MESÁRIO POOMSAE DESCONECTADO")
+        print(f"{'='*60}")
+        print(f"  Hora: {__import__('datetime').datetime.now().isoformat()}")
+        print(f"  Luta: {luta_id}")
+        print(f"{'='*60}\n")
+        
+        if luta_id in poomsae_mesario_connections:
+            try:
+                poomsae_mesario_connections[luta_id].remove(websocket)
+            except ValueError:
+                pass
+            
+            if not poomsae_mesario_connections[luta_id]:
+                del poomsae_mesario_connections[luta_id]
+
+
+async def broadcast_poomsae_resultado(luta_id: str, resultado_data: dict):
+    """
+    Envia resultado final do Poomsae para TODOS os Mesários conectados
+    """
+    print(f"\n{'='*60}")
+    print(f"📢 BROADCAST POOMSAE RESULTADO")
+    print(f"{'='*60}")
+    print(f"  Luta: {luta_id}")
+    print(f"  Resultado: {resultado_data.get('resultado_final', {}).get('vencedor')}")
+    print(f"{'='*60}\n")
+    
+    if luta_id not in poomsae_mesario_connections:
+        print(f"⚠️ Nenhum Mesário conectado para {luta_id}")
+        return
+    
+    mensagem = {
+        "tipo": "poomsae_resultado_final",
+        "status": "resultado_final",
+        "resultado_final": resultado_data.get("resultado_final", {}),
+        "mensagem": resultado_data.get("mensagem", "Resultado do Poomsae")
+    }
+    
+    desconectados = []
+    for websocket in poomsae_mesario_connections[luta_id]:
+        try:
+            await websocket.send_json(mensagem)
+            print(f"✅ Enviado para Mesário")
+        except Exception as e:
+            print(f"❌ Erro ao enviar para Mesário: {e}")
+            desconectados.append(websocket)
+    
+    # Limpar desconectados
+    for ws in desconectados:
+        try:
+            poomsae_mesario_connections[luta_id].remove(ws)
+        except ValueError:
+            pass
 
 
 # ===== ENDPOINTS HTTP (complementares) =====
