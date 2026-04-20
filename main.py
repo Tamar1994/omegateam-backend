@@ -20,6 +20,7 @@ import math
 from bson.objectid import ObjectId  
 from routers.joystick import router as joystick_router
 from routers.arbitros import router as arbitros_router
+from routers.noticias import router as noticias_router
 
 # Carrega as variáveis de ambiente do arquivo .env
 load_dotenv()
@@ -38,6 +39,7 @@ app.add_middleware(
 # ===== REGISTRAR ROUTERS =====
 app.include_router(joystick_router)
 app.include_router(arbitros_router)
+app.include_router(noticias_router)
 
 # Conexão com MongoDB
 MONGO_URI = os.getenv("MONGO_URI")
