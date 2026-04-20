@@ -566,6 +566,100 @@ async def notificar_fim_luta(luta_id: str, db: AsyncIOMotorDatabase = Depends(ge
     }
 
 
+@router.get("/poomsae/{luta_id}/validar-mesario-gate")
+async def validar_mesario_gate(luta_id: str, db: AsyncIOMotorDatabase = Depends(get_db)):
+    """
+    ✅ MESÁRIO GATE - Verifica se TODOS os juízes registraram as notas
+    
+    Retorna:
+    - todos_registraram: bool (True = pode passar para próximo)
+    - status_juizes: dict com status de cada juiz
+    - mensagem: string descritiva
+    
+    BLOQUEIA o mesário se nem todos registraram!
+    """
+    try:
+        luta = await db.lutas.find_one({"_id": ObjectId(luta_id)})
+    except:
+        luta = await db.lutas.find_one({"_id": luta_id})
+    
+    if not luta:
+        return {
+            "todos_registraram": False,
+            "status": "erro",
+            "mensagem": "Luta não encontrada"
+        }
+    
+    # Verificar se a sessão de Poomsae existe
+    if luta_id not in joystick_manager.poomsaes_ativas:
+        return {
+            "todos_registraram": False,
+            "status": "aguardando",
+            "mensagem": "Nenhum juiz registrou notas ainda"
+        }
+    
+    sessao = joystick_manager.poomsaes_ativas[luta_id]
+    
+    # Verificar accuracy e apresentação
+    accuracy_registrados = sessao.get("accuracy_por_atleta", {})
+    apresentacao_registrados = sessao.get("apresentacao_por_atleta", {})
+    
+    # Precisa de votos para VERMELHO e AZUL em AMBAS as fases
+    vermelho_accuracy = len(accuracy_registrados.get("vermelho", []))
+    azul_accuracy = len(accuracy_registrados.get("azul", []))
+    vermelho_apresentacao = len(apresentacao_registrados.get("vermelho", []))
+    azul_apresentacao = len(apresentacao_registrados.get("azul", []))
+    
+    # Número esperado de juízes (padrão 2, mas checar na luta)
+    num_juizes = sessao.get("numero_juizes", 2)
+    
+    # Status de cada atleta
+    status_juizes = {
+        "vermelho": {
+            "accuracy": {"registrados": vermelho_accuracy, "esperados": num_juizes},
+            "apresentacao": {"registrados": vermelho_apresentacao, "esperados": num_juizes}
+        },
+        "azul": {
+            "accuracy": {"registrados": azul_accuracy, "esperados": num_juizes},
+            "apresentacao": {"registrados": azul_apresentacao, "esperados": num_juizes}
+        }
+    }
+    
+    # Verificar se TODOS registraram
+    todos_registraram = (
+        vermelho_accuracy >= num_juizes and
+        azul_accuracy >= num_juizes and
+        vermelho_apresentacao >= num_juizes and
+        azul_apresentacao >= num_juizes
+    )
+    
+    if todos_registraram:
+        return {
+            "todos_registraram": True,
+            "status": "ok",
+            "mensagem": f"✅ Todos os {num_juizes} juízes registraram as notas!",
+            "status_juizes": status_juizes
+        }
+    else:
+        faltando = []
+        if vermelho_accuracy < num_juizes:
+            faltando.append(f"Accuracy Vermelho ({vermelho_accuracy}/{num_juizes})")
+        if azul_accuracy < num_juizes:
+            faltando.append(f"Accuracy Azul ({azul_accuracy}/{num_juizes})")
+        if vermelho_apresentacao < num_juizes:
+            faltando.append(f"Apresentação Vermelho ({vermelho_apresentacao}/{num_juizes})")
+        if azul_apresentacao < num_juizes:
+            faltando.append(f"Apresentação Azul ({azul_apresentacao}/{num_juizes})")
+        
+        return {
+            "todos_registraram": False,
+            "status": "aguardando",
+            "mensagem": f"⏳ Aguardando notas: {', '.join(faltando)}",
+            "status_juizes": status_juizes,
+            "bloqueado": True
+        }
+
+
 @router.websocket("/ws/mesario/{luta_id}/{numero_quadra}")
 async def websocket_mesario(websocket: WebSocket, luta_id: str, numero_quadra: int):
     """

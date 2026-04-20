@@ -433,8 +433,25 @@ async def sortear_poomsaes_campeonato(camp_id: str, db: AsyncIOMotorDatabase = D
         
         await db.lutas.update_one({"_id": luta["_id"]}, {"$set": {"poomsae_1": sorteados[0], "poomsae_2": sorteados[1]}})
         atualizados += 1
+    
+    # Criar notícia do sorteio
+    from datetime import datetime
+    noticia_sorteio = {
+        "titulo": f"🎲 Sorteio de Poomsaes Realizado",
+        "conteudo": f"{atualizados} chaves foram atualizadas com os Poomsaes oficiais. Os atletas devem consultar seu quadro de apresentações.",
+        "campeonato_id": camp_id,
+        "tipo": "sortear_poomsae",
+        "data_criacao": datetime.utcnow().isoformat(),
+        "ativa": True
+    }
+    
+    try:
+        await db.noticias.insert_one(noticia_sorteio)
+    except Exception as e:
+        print(f"Aviso: Não foi possível criar notícia do sorteio: {str(e)}")
         
     return {"mensagem": f"Sorteio concluído! {atualizados} chaves atualizadas com os Poomsaes oficiais."}
+
 
 
 @router.get("/scoreboard/luta-atual")
