@@ -404,6 +404,31 @@ async def finalizar_luta_banco(luta_id: str, dados: FinalizarLutaData, db: Async
     return {"mensagem": "Luta encerrada salva no banco!"}
 
 
+@router.put("/lutas/{luta_id}/atualizar-turno-poomsae")
+async def atualizar_turno_poomsae(luta_id: str, dados: dict, db: AsyncIOMotorDatabase = Depends(get_db)):
+    """
+    Atualiza qual Poomsae está sendo executado (turno_poomsae).
+    
+    Esperado: {
+        "turno_poomsae": "chong_p1" | "chong_p2" | "hong_p1" | "hong_p2"
+    }
+    """
+    turno = dados.get("turno_poomsae")
+    
+    if turno not in ["chong_p1", "chong_p2", "hong_p1", "hong_p2"]:
+        raise HTTPException(status_code=400, detail="Turno inválido")
+    
+    resultado = await db.lutas.update_one(
+        {"_id": ObjectId(luta_id)},
+        {"$set": {"turno_poomsae": turno}}
+    )
+    
+    if resultado.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Luta não encontrada.")
+    
+    return {"mensagem": f"Turno Poomsae atualizado para: {turno}"}
+
+
 @router.post("/campeonatos/{camp_id}/sortear-poomsaes")
 async def sortear_poomsaes_campeonato(camp_id: str, db: AsyncIOMotorDatabase = Depends(get_db)):
     """Sorteia os Poomsaes oficiais para as categorias de Faixa Preta"""
