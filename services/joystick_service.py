@@ -82,34 +82,69 @@ class CoincidenceWindow:
 
 @dataclass
 class PoomsaeScoring:
-    """Sistema de cálculo de pontuação para Poomsae"""
+    """Sistema de cálculo de pontuação para Poomsae com suporte a 2 atletas (Chong e Hong)"""
     luta_id: str
     numero_juizes: int  # 3, 5, ou 7
-    notas_recebidas: Dict[str, float] = field(default_factory=dict)  # {"juiz1": 7.5, ...}
-    tempo_inicio: datetime = field(default_factory=datetime.utcnow)
-    timeout_segundos: int = 60  # Tempo máximo para todos enviarem
     
-    def registrar_nota(self, juiz_email: str, nota: float) -> bool:
-        """Registra nota de um juiz"""
+    # Rastrear notas por atleta: {"vermelho": {juiz1: 8.5, juiz2: 8.3}, "azul": {...}}
+    notas_por_atleta: Dict[str, Dict[str, float]] = field(default_factory=lambda: {"vermelho": {}, "azul": {}})
+    
+    # Notas finais calculadas
+    nota_final_vermelho: Optional[float] = None
+    nota_final_azul: Optional[float] = None
+    
+    tempo_inicio: datetime = field(default_factory=datetime.utcnow)
+    timeout_segundos: int = 120  # Tempo máximo para todos enviarem (2 min por atleta)
+    
+    def registrar_nota(self, juiz_email: str, nota: float, atleta: str = "vermelho") -> dict:
+        """
+        Registra nota de um juiz para um atleta específico.
+        Retorna status e resultado se completo.
+        """
         if not 0 <= nota <= 10:
             raise ValueError("Nota deve estar entre 0 e 10")
         
-        if juiz_email in self.notas_recebidas:
-            raise ValueError(f"Juiz {juiz_email} já enviou sua nota")
+        if atleta not in ["vermelho", "azul"]:
+            raise ValueError("Atleta deve ser 'vermelho' ou 'azul'")
         
-        self.notas_recebidas[juiz_email] = nota
-        return len(self.notas_recebidas) == self.numero_juizes
+        if juiz_email in self.notas_por_atleta[atleta]:
+            raise ValueError(f"Juiz {juiz_email} já enviou nota para {atleta}")
+        
+        self.notas_por_atleta[atleta][juiz_email] = nota
+        
+        # Verificar se todos os juízes votaram para este atleta
+        votos_atleta = len(self.notas_por_atleta[atleta])
+        completo_atleta = votos_atleta == self.numero_juizes
+        
+        # Verificar se ambos os atletas têm todas as notas
+        completo_ambos = (
+            len(self.notas_por_atleta["vermelho"]) == self.numero_juizes and
+            len(self.notas_por_atleta["azul"]) == self.numero_juizes
+        )
+        
+        return {
+            "atleta": atleta,
+            "juiz": juiz_email,
+            "nota_registrada": nota,
+            "votos_para_atleta": votos_atleta,
+            "votos_esperados": self.numero_juizes,
+            "completo_atleta": completo_atleta,
+            "completo_ambos": completo_ambos
+        }
     
     def todas_notas_recebidas(self) -> bool:
-        """Verifica se todos os juízes enviaram suas notas"""
-        return len(self.notas_recebidas) == self.numero_juizes
+        """Verifica se todos os juízes enviaram notas para AMBOS atletas"""
+        return (
+            len(self.notas_por_atleta["vermelho"]) == self.numero_juizes and
+            len(self.notas_por_atleta["azul"]) == self.numero_juizes
+        )
     
     def tempo_expirou(self) -> bool:
         """Verifica se o tempo limite foi ultrapassado"""
         decorrido = (datetime.utcnow() - self.tempo_inicio).total_seconds()
         return decorrido > self.timeout_segundos
     
-    def calcular_nota_final(self) -> Optional[float]:
+    def calcular_nota_final(self, atleta: str) -> Optional[float]:
         """
         Calcula a nota final descartando maior e menor nota.
         Retorna a média aritmética das notas restantes.
@@ -117,41 +152,84 @@ class PoomsaeScoring:
         if not self.todas_notas_recebidas():
             return None
         
-        notas = list(self.notas_recebidas.values())
+        notas = list(self.notas_por_atleta[atleta].values())
         
-        # Descartar nota mais alta e mais baixa
+        if len(notas) < 1:
+            return None
+        
+        if len(notas) == 1:
+            # Com 1 juiz, não descarta nada
+            return round(notas[0], 2)
+        
+        if len(notas) == 2:
+            # Com 2 juízes, não descarta nada (faz a média simples)
+            media = statistics.mean(notas)
+            return round(media, 2)
+        
+        # Com 3+: Descartar nota mais alta e mais baixa
         notas_ordenadas = sorted(notas)
         notas_validas = notas_ordenadas[1:-1]  # Remove primeira e última
         
         if not notas_validas:
             return None
         
-        # Calcular média
         media = statistics.mean(notas_validas)
-        
-        # Formatar com 2 casas decimais
         return round(media, 2)
+    
+    def computar_notas_finais(self) -> bool:
+        """Computa as notas finais para ambos atletas"""
+        if not self.todas_notas_recebidas():
+            return False
+        
+        self.nota_final_vermelho = self.calcular_nota_final("vermelho")
+        self.nota_final_azul = self.calcular_nota_final("azul")
+        
+        return True
     
     def gerar_relatorio(self) -> dict:
         """Gera relatório completo da pontuação"""
         if not self.todas_notas_recebidas():
             return {
                 "status": "incompleto",
-                "notas_recebidas": len(self.notas_recebidas),
+                "notas_vermelho": len(self.notas_por_atleta["vermelho"]),
+                "notas_azul": len(self.notas_por_atleta["azul"]),
                 "notas_esperadas": self.numero_juizes
             }
         
-        notas = list(self.notas_recebidas.values())
-        nota_final = self.calcular_nota_final()
+        # Computar se não foi feito ainda
+        if self.nota_final_vermelho is None or self.nota_final_azul is None:
+            self.computar_notas_finais()
+        
+        notas_verm = list(self.notas_por_atleta["vermelho"].values())
+        notas_azul = list(self.notas_por_atleta["azul"].values())
+        
+        vencedor = None
+        if self.nota_final_vermelho > self.nota_final_azul:
+            vencedor = "vermelho"
+        elif self.nota_final_azul > self.nota_final_vermelho:
+            vencedor = "azul"
+        else:
+            vencedor = "empate"
         
         return {
             "status": "completo",
-            "notas_individuais": self.notas_recebidas,
-            "nota_descartada_menor": min(notas),
-            "nota_descartada_maior": max(notas),
-            "notas_utilizadas": sorted(notas)[1:-1],
-            "nota_final": nota_final,
-            "processado_em": datetime.utcnow().isoformat()
+            "notas_vermelho": self.notas_por_atleta["vermelho"],
+            "notas_azul": self.notas_por_atleta["azul"],
+            "nota_final_vermelho": self.nota_final_vermelho,
+            "nota_final_azul": self.nota_final_azul,
+            "vencedor": vencedor,
+            "detalhes": {
+                "vermelho": {
+                    "minima": min(notas_verm) if notas_verm else None,
+                    "maxima": max(notas_verm) if notas_verm else None,
+                    "total_notas": len(notas_verm)
+                },
+                "azul": {
+                    "minima": min(notas_azul) if notas_azul else None,
+                    "maxima": max(notas_azul) if notas_azul else None,
+                    "total_notas": len(notas_azul)
+                }
+            }
         }
 
 
@@ -224,10 +302,18 @@ class JoystickManager:
         self.poomsaes_ativas[luta_id] = sessao
         return sessao
     
-    def registrar_nota_poomsae(self, luta_id: str, juiz_email: str, nota: float) -> dict:
+    def registrar_nota_poomsae(self, luta_id: str, juiz_email: str, nota: float, atleta: str = "vermelho") -> dict:
         """
-        Registra nota de um juiz para Poomsae.
-        Retorna status e resultado final se completo.
+        Registra nota de um juiz para Poomsae (atleta específico).
+        
+        Args:
+            luta_id: ID da luta
+            juiz_email: Email do juiz
+            nota: Nota (0-10)
+            atleta: "vermelho" (Chong) ou "azul" (Hong)
+            
+        Retorna:
+            status e resultado final se completo para ambos atletas
         """
         if luta_id not in self.poomsaes_ativas:
             raise ValueError(f"Sessão de Poomsae não encontrada para luta {luta_id}")
@@ -238,19 +324,21 @@ class JoystickManager:
             raise ValueError("Tempo limite para envio de notas foi ultrapassado")
         
         # Registrar nota
-        todas_recebidas = sessao.registrar_nota(juiz_email, nota)
+        resultado_registro = sessao.registrar_nota(juiz_email, nota, atleta)
         
         response = {
             "luta_id": luta_id,
             "juiz_email": juiz_email,
+            "atleta": atleta,
             "nota_registrada": nota,
-            "notas_recebidas": len(sessao.notas_recebidas),
-            "notas_esperadas": sessao.numero_juizes,
+            "votos_para_atleta": resultado_registro["votos_para_atleta"],
+            "votos_esperados": sessao.numero_juizes,
             "status": "em_espera"
         }
         
-        # Se todas as notas foram recebidas, calcular resultado
-        if todas_recebidas:
+        # Se todas as notas foram recebidas para AMBOS atletas, calcular resultado
+        if resultado_registro["completo_ambos"]:
+            sessao.computar_notas_finais()
             response["status"] = "completo"
             response["relatorio"] = sessao.gerar_relatorio()
             
