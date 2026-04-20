@@ -635,14 +635,28 @@ async def gerar_chaves(camp_id: str, dados: GerarChavesData):
                 lutas_geradas.append(luta)
                 ordem_geral += 1
                 
-        else:
-            # Poomsae: Mantém a ordem de inscrição para a ordem de apresentação
-            for i, atleta in enumerate(atletas):
-                apresentacao = {
-                    "campeonato_id": camp_id, "categoria_id": cat_id, "modalidade": "Poomsae",
-                    "ordem_luta": ordem_geral, "ordem_apresentacao": i + 1,
-                    "atleta": atleta["nome"], "status": "Aguardando Chamada"
-                }
+        else:  # ✅ POOMSAE - Criar chaves 1v1 (Chong vs Hong)
+            # Mantém a ordem de inscrição para criar os pares
+            N = len(atletas)
+            for i in range(0, N, 2):
+                if i + 1 < N:
+                    # Par completo: Chong e Hong
+                    apresentacao = {
+                        "campeonato_id": camp_id, "categoria_id": cat_id, "modalidade": "Poomsae",
+                        "ordem_luta": ordem_geral,
+                        "atleta_vermelho": atletas[i]["nome"],      # Chong (Vermelho)
+                        "atleta_azul": atletas[i+1]["nome"],        # Hong (Azul)
+                        "status": "Aguardando Chamada"
+                    }
+                else:
+                    # Atleta impar (só apresenta, sem oponente)
+                    apresentacao = {
+                        "campeonato_id": camp_id, "categoria_id": cat_id, "modalidade": "Poomsae",
+                        "ordem_luta": ordem_geral,
+                        "atleta_vermelho": atletas[i]["nome"],
+                        "atleta_azul": "BYE (Avança Direto)",
+                        "status": "Aguardando Chamada"
+                    }
                 lutas_geradas.append(apresentacao)
                 ordem_geral += 1
 
@@ -752,14 +766,26 @@ async def gerar_cronograma(camp_id: str, config: ConfigCronograma):
                     "atleta_vermelho": restantes[i]["nome"], "atleta_azul": azul,
                     "status": "Aguardando Chamada", "duracao_min": duracao
                 })
-        else: # Poomsae
+        else: # ✅ POOMSAE - Criar chaves 1v1 (Chong vs Hong)
             duracao = 8 if is_preta else 7
-            for i, atleta in enumerate(atletas):
-                todas_as_lutas_geradas.append({
-                    "campeonato_id": camp_id, "categoria_id": cat_id, "modalidade": "Poomsae",
-                    "ordem_apresentacao": i + 1, "atleta": atleta["nome"],
-                    "status": "Aguardando Chamada", "duracao_min": duracao
-                })
+            N = len(atletas)
+            for i in range(0, N, 2):
+                if i + 1 < N:
+                    # Par completo: Chong e Hong
+                    todas_as_lutas_geradas.append({
+                        "campeonato_id": camp_id, "categoria_id": cat_id, "modalidade": "Poomsae",
+                        "atleta_vermelho": atletas[i]["nome"],      # Chong (Vermelho)
+                        "atleta_azul": atletas[i+1]["nome"],        # Hong (Azul)
+                        "status": "Aguardando Chamada", "duracao_min": duracao
+                    })
+                else:
+                    # Atleta impar (só apresenta, sem oponente)
+                    todas_as_lutas_geradas.append({
+                        "campeonato_id": camp_id, "categoria_id": cat_id, "modalidade": "Poomsae",
+                        "atleta_vermelho": atletas[i]["nome"],
+                        "atleta_azul": "BYE (Avança Direto)",
+                        "status": "Aguardando Chamada", "duracao_min": duracao
+                    })
 
     # 2. DISTRIBUI NAS QUADRAS (CRONOGRAMA)
     # Inicializa os relógios das quadras

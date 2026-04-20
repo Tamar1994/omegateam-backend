@@ -221,14 +221,28 @@ async def gerar_cronograma(camp_id: str, config: ConfigCronograma, db: AsyncIOMo
                     "atleta_vermelho": restantes[i]["nome"], "atleta_azul": azul,
                     "status": "Aguardando Chamada", "duracao_min": duracao
                 })
-        else:
+        else:  # ✅ POOMSAE - Criar chaves 1v1 (Chong vs Hong)
             duracao = 8 if is_preta else 7
-            for i, atleta in enumerate(atletas):
-                todas_as_lutas_geradas.append({
-                    "campeonato_id": camp_id, "categoria_id": cat_id, "modalidade": "Poomsae",
-                    "ordem_apresentacao": i + 1, "atleta": atleta["nome"],
-                    "status": "Aguardando Chamada", "duracao_min": duracao
-                })
+            
+            # Criar pares de apresentações (Chong vs Hong)
+            N = len(atletas)
+            for i in range(0, N, 2):
+                if i + 1 < N:
+                    # Par completo: Chong e Hong
+                    todas_as_lutas_geradas.append({
+                        "campeonato_id": camp_id, "categoria_id": cat_id, "modalidade": "Poomsae",
+                        "atleta_vermelho": atletas[i]["nome"],      # Chong (Vermelho)
+                        "atleta_azul": atletas[i+1]["nome"],        # Hong (Azul)
+                        "status": "Aguardando Chamada", "duracao_min": duracao
+                    })
+                else:
+                    # Atleta impar (só apresenta, sem oponente)
+                    todas_as_lutas_geradas.append({
+                        "campeonato_id": camp_id, "categoria_id": cat_id, "modalidade": "Poomsae",
+                        "atleta_vermelho": atletas[i]["nome"],
+                        "atleta_azul": "BYE (Avança Direto)",
+                        "status": "Aguardando Chamada", "duracao_min": duracao
+                    })
 
     # Distribui nas quadras
     hora_inicio_dt = datetime.strptime(config.horario_inicio, "%H:%M")
