@@ -433,19 +433,37 @@ class JoystickManager:
         return response
     
     def obter_status_poomsae(self, luta_id: str) -> dict:
-        """Obtém status atual de uma sessão de Poomsae"""
+        """Obtém status atual de uma sessão de Poomsae (incompleta)"""
         if luta_id not in self.poomsaes_ativas:
-            return {"status": "nao_existe"}
+            return {
+                "status": "nao_existe",
+                "luta_id": luta_id,
+                "mensagem": "Nenhuma sessão de Poomsae em progresso"
+            }
         
         sessao = self.poomsaes_ativas[luta_id]
         
+        # Contar accuracy e apresentação por atleta
+        accuracy_vermelho = len(sessao.accuracy_por_atleta.get("vermelho", {}))
+        accuracy_azul = len(sessao.accuracy_por_atleta.get("azul", {}))
+        apresentacao_vermelho = len(sessao.apresentacao_por_atleta.get("vermelho", {}))
+        apresentacao_azul = len(sessao.apresentacao_por_atleta.get("azul", {}))
+        
         return {
-            "status": "em_progresso",
-            "notas_recebidas": len(sessao.notas_recebidas),
-            "notas_esperadas": sessao.numero_juizes,
+            "status": "incompleto",
+            "luta_id": luta_id,
+            "numero_juizes": sessao.numero_juizes,
+            "accuracy": {
+                "vermelho": f"{accuracy_vermelho}/{sessao.numero_juizes}",
+                "azul": f"{accuracy_azul}/{sessao.numero_juizes}"
+            },
+            "apresentacao": {
+                "vermelho": f"{apresentacao_vermelho}/{sessao.numero_juizes}",
+                "azul": f"{apresentacao_azul}/{sessao.numero_juizes}"
+            },
+            "todos_completos": sessao.todas_notas_recebidas(),
             "tempo_restante_segundos": max(0, sessao.timeout_segundos - 
-                                          (datetime.utcnow() - sessao.tempo_inicio).total_seconds()),
-            "juizes_que_ja_votaram": list(sessao.notas_recebidas.keys())
+                                          (datetime.utcnow() - sessao.tempo_inicio).total_seconds())
         }
 
 
