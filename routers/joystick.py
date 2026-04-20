@@ -385,156 +385,125 @@ async def websocket_lateral(websocket: WebSocket, campeonato_id: str, lateral_em
 @router.websocket("/ws/poomsae/{luta_id}/{juiz_email}")
 async def websocket_poomsae(websocket: WebSocket, luta_id: str, juiz_email: str):
     """
-    WebSocket para juiz lateral enviar nota de Poomsae POR ATLETA.
+    WebSocket para juiz lateral enviar notas de Poomsae - NOVO SISTEMA.
     
-    NOVO FLUXO (2 Atletas):
-    1. Juiz conecta
-    2. Recebe formulário para Atleta 1 (Chong/Vermelho)
-    3. Envia nota para Atleta 1
-    4. Servidor aguarda outros juízes para Atleta 1
-    5. Se completo para Atleta 1, envia resultado e passa para Atleta 2
-    6. Repete para Atleta 2 (Hong/Azul)
-    7. Quando ambos completos, envia resultado final
+    NOVO FLUXO:
+    1. Frontend envia: tipo='poomsae_accuracy', atletaAtual, nota_accuracy
+    2. Backend registra e confirma
+    3. Frontend envia: tipo='poomsae_apresentacao', atletaAtual, velocidade, ritmo, expressao
+    4. Backend registra e se completo, envia resultado final
     """
     await websocket.accept()
     
     try:
-        # Enviar confirmação de conexão e aguardar primeira nota (Chong/Vermelho)
+        # Receber ACCURACY (primeira mensagem)
+        data_accuracy = await websocket.receive_json()
+        
+        if data_accuracy.get("tipo") != "poomsae_accuracy":
+            await websocket.send_json({
+                "status": "erro",
+                "mensagem": "Esperava tipo='poomsae_accuracy' como primeira mensagem"
+            })
+            await websocket.close()
+            return
+        
+        nota_accuracy = float(data_accuracy.get("nota_accuracy", 0))
+        atleta_atual = data_accuracy.get("atletaAtual", "vermelho")
+        
+        # Criar sessão se não existir
+        if luta_id not in joystick_manager.poomsaes_ativas:
+            # Deduzir número de juízes (assumir 2 para Poomsae)
+            joystick_manager.criar_sessao_poomsae(luta_id, numero_juizes=2)
+        
+        # Registrar ACCURACY
+        resultado_acc = joystick_manager.registrar_accuracy_poomsae(
+            luta_id=luta_id,
+            juiz_email=juiz_email,
+            nota=nota_accuracy,
+            atleta=atleta_atual
+        )
+        
+        # Confirmar recebimento de ACCURACY
         await websocket.send_json({
-            "tipo": "poomsae_notas_computadas",
-            "status": "pronto_para_nota",
-            "atletaAtual": "vermelho",
-            "mensagem": "Pronto para avaliar Chong (Vermelho)"
+            "tipo": "accuracy_confirmada",
+            "status": "ok",
+            "atleta": atleta_atual,
+            "nota_accuracy": nota_accuracy,
+            "votos_accuracy": resultado_acc["votos_para_atleta"],
+            "votos_esperados": resultado_acc["votos_esperados"],
+            "mensagem": "Accuracy registrada. Aguardando apresentação..."
         })
         
-        # ===== ATLETA 1: CHONG (VERMELHO) =====
-        data_verm = await websocket.receive_json()
+        # Receber APRESENTAÇÃO (segunda mensagem)
+        data_apresentacao = await websocket.receive_json()
         
-        if "nota" not in data_verm:
+        if data_apresentacao.get("tipo") != "poomsae_apresentacao":
             await websocket.send_json({
                 "status": "erro",
-                "mensagem": "Campo 'nota' é obrigatório"
+                "mensagem": "Esperava tipo='poomsae_apresentacao' como segunda mensagem"
             })
             await websocket.close()
             return
         
-        try:
-            nota_verm = float(data_verm["nota"])
-            
-            # Registrar nota para VERMELHO
-            resultado_verm = joystick_manager.registrar_nota_poomsae(
-                luta_id=luta_id,
-                juiz_email=juiz_email,
-                nota=nota_verm,
-                atleta="vermelho"
-            )
-            
-            # Enviar confirmação
-            await websocket.send_json({
-                "tipo": "poomsae_nota_recebida",
-                "status": "nota_registrada",
-                "atletaAtual": "vermelho",
-                "nota": nota_verm,
-                "votos_para_atleta": resultado_verm["votos_para_atleta"],
-                "votos_esperados": resultado_verm["votos_esperados"]
-            })
-            
-            # Verificar se Vermelho está completo
-            if resultado_verm["status"] == "em_espera" and resultado_verm["votos_para_atleta"] < resultado_verm["votos_esperados"]:
-                # Aguardar outros juízes para Vermelho
-                await websocket.send_json({
-                    "tipo": "poomsae_computando",
-                    "status": "computando_notas",
-                    "atletaAtual": "vermelho",
-                    "mensagem": f"Computando notas de Vermelho ({resultado_verm['votos_para_atleta']}/{resultado_verm['votos_esperados']})..."
-                })
-            
-            # Se vermelho está completo, passar para Azul
-            if resultado_verm["votos_para_atleta"] == resultado_verm["votos_esperados"]:
-                relatorio_verm = resultado_verm.get("relatorio", {})
-                nota_final_verm = relatorio_verm.get("nota_final_vermelho")
-                
-                await websocket.send_json({
-                    "tipo": "poomsae_atleta_completo",
-                    "status": "atleta_completo",
-                    "atletaCompleto": "vermelho",
-                    "notaFinal": nota_final_verm,
-                    "proximoAtleta": "azul",
-                    "mensagem": f"Vermelho avaliado! Nota final: {nota_final_verm}. Agora avaliar Azul (Hong)"
-                })
+        velocidade = float(data_apresentacao.get("nota_velocidade", 0))
+        ritmo = float(data_apresentacao.get("nota_ritmo", 0))
+        expressao = float(data_apresentacao.get("nota_expressao", 0))
+        atleta = data_apresentacao.get("atletaAtual", atleta_atual)
         
-        except ValueError as e:
-            await websocket.send_json({
-                "status": "erro",
-                "mensagem": f"Erro ao processar nota de Vermelho: {str(e)}"
-            })
-            await websocket.close()
-            return
+        # Registrar APRESENTAÇÃO
+        resultado_apre = joystick_manager.registrar_apresentacao_poomsae(
+            luta_id=luta_id,
+            juiz_email=juiz_email,
+            velocidade=velocidade,
+            ritmo=ritmo,
+            expressao=expressao,
+            atleta=atleta
+        )
         
-        # ===== ATLETA 2: HONG (AZUL) =====
-        data_azul = await websocket.receive_json()
+        # Confirmar recebimento de APRESENTAÇÃO
+        await websocket.send_json({
+            "tipo": "apresentacao_confirmada",
+            "status": "ok",
+            "atleta": atleta,
+            "velocidade": velocidade,
+            "ritmo": ritmo,
+            "expressao": expressao,
+            "votos_apresentacao": resultado_apre["votos_para_atleta"],
+            "votos_esperados": resultado_apre["votos_esperados"]
+        })
         
-        if "nota" not in data_azul:
+        # Se resultado está completo, enviar resultado final
+        if resultado_apre["status"] == "completo":
+            relatorio = resultado_apre.get("relatorio", {})
+            
             await websocket.send_json({
-                "status": "erro",
-                "mensagem": "Campo 'nota' é obrigatório"
-            })
-            await websocket.close()
-            return
-        
-        try:
-            nota_azul = float(data_azul["nota"])
-            
-            # Registrar nota para AZUL
-            resultado_azul = joystick_manager.registrar_nota_poomsae(
-                luta_id=luta_id,
-                juiz_email=juiz_email,
-                nota=nota_azul,
-                atleta="azul"
-            )
-            
-            # Enviar confirmação
-            await websocket.send_json({
-                "tipo": "poomsae_nota_recebida",
-                "status": "nota_registrada",
-                "atletaAtual": "azul",
-                "nota": nota_azul,
-                "votos_para_atleta": resultado_azul["votos_para_atleta"],
-                "votos_esperados": resultado_azul["votos_esperados"]
-            })
-            
-            # Se todas as notas foram recebidas (ambos atletas completos), enviar resultado final
-            if resultado_azul["status"] == "completo":
-                relatorio = resultado_azul.get("relatorio", {})
-                
-                await websocket.send_json({
-                    "tipo": "poomsae_resultado_final",
-                    "status": "resultado_final",
-                    "resultado_final": {
-                        "notas": {
-                            "vermelho": relatorio.get("nota_final_vermelho"),
-                            "azul": relatorio.get("nota_final_azul")
-                        },
-                        "vencedor": relatorio.get("vencedor"),
-                        "relatorio_completo": relatorio
+                "tipo": "poomsae_resultado_final",
+                "status": "resultado_final",
+                "resultado_final": {
+                    "notas": {
+                        "vermelho": relatorio.get("nota_final_vermelho", 0),
+                        "azul": relatorio.get("nota_final_azul", 0)
                     },
-                    "mensagem": f"Poomsae completo! Vencedor: {relatorio.get('vencedor')}"
-                })
-            else:
-                # Ainda aguardando outros juízes
-                await websocket.send_json({
-                    "tipo": "poomsae_computando",
-                    "status": "computando_notas",
-                    "atletaAtual": "azul",
-                    "mensagem": f"Computando notas de Azul ({resultado_azul['votos_para_atleta']}/{resultado_azul['votos_esperados']})..."
-                })
-        
-        except ValueError as e:
+                    "detalhes": relatorio.get("notas", {}),
+                    "vencedor": relatorio.get("vencedor")
+                },
+                "mensagem": f"Poomsae completo! Vencedor: {relatorio.get('vencedor')}"
+            })
+        else:
+            # Aguardando outros juízes
             await websocket.send_json({
-                "status": "erro",
-                "mensagem": f"Erro ao processar nota de Azul: {str(e)}"
+                "tipo": "poomsae_computando",
+                "status": "computando",
+                "atleta": atleta,
+                "mensagem": f"Computando notas... Aguardando outros árbitros."
             })
     
+    except ValueError as e:
+        await websocket.send_json({
+            "status": "erro",
+            "mensagem": f"Erro ao processar notas: {str(e)}"
+        })
+        await websocket.close()
     except WebSocketDisconnect:
         print(f"Juiz {juiz_email} desconectado da sessão Poomsae {luta_id}")
 

@@ -82,61 +82,100 @@ class CoincidenceWindow:
 
 @dataclass
 class PoomsaeScoring:
-    """Sistema de cálculo de pontuação para Poomsae com suporte a 2 atletas (Chong e Hong)"""
-    luta_id: str
-    numero_juizes: int  # 3, 5, ou 7
+    """
+    Sistema de cálculo de pontuação para Poomsae com 2 fases:
     
-    # Rastrear notas por atleta: {"vermelho": {juiz1: 8.5, juiz2: 8.3}, "azul": {...}}
-    notas_por_atleta: Dict[str, Dict[str, float]] = field(default_factory=lambda: {"vermelho": {}, "azul": {}})
+    FASE 1: ACCURACY (Precisão)
+    - Base: 4.00
+    - Deduções: -0.1 (simples) ou -0.3 (grave)
+    - Mínimo: 0.00
+    
+    FASE 2: APRESENTAÇÃO (após accuracy completa)
+    - 3 quesitos, cada um 0-2.00:
+      - Velocidade e Força
+      - Ritmo/Tempo
+      - Expressão de Energia
+    - Total máximo: 6.00
+    
+    NOTA FINAL = ACCURACY + APRESENTAÇÃO (máx 10.00)
+    """
+    luta_id: str
+    numero_juizes: int
+    
+    # Rastrear ACCURACY por atleta: {"vermelho": {juiz1: 3.8, juiz2: 3.7}, "azul": {...}}
+    accuracy_por_atleta: Dict[str, Dict[str, float]] = field(default_factory=lambda: {"vermelho": {}, "azul": {}})
+    
+    # Rastrear APRESENTAÇÃO por atleta: {"vermelho": {juiz1: {...}, juiz2: {...}}, "azul": {...}}
+    # Cada apresentação tem: {velocidade: 1.5, ritmo: 1.8, expressao: 2.0}
+    apresentacao_por_atleta: Dict[str, Dict[str, dict]] = field(default_factory=lambda: {"vermelho": {}, "azul": {}})
     
     # Notas finais calculadas
-    nota_final_vermelho: Optional[float] = None
-    nota_final_azul: Optional[float] = None
+    notas_finais: Dict[str, float] = field(default_factory=dict)  # {"vermelho": 9.2, "azul": 8.5}
     
     tempo_inicio: datetime = field(default_factory=datetime.utcnow)
-    timeout_segundos: int = 120  # Tempo máximo para todos enviarem (2 min por atleta)
+    timeout_segundos: int = 120
     
-    def registrar_nota(self, juiz_email: str, nota: float, atleta: str = "vermelho") -> dict:
-        """
-        Registra nota de um juiz para um atleta específico.
-        Retorna status e resultado se completo.
-        """
-        if not 0 <= nota <= 10:
-            raise ValueError("Nota deve estar entre 0 e 10")
+    def registrar_accuracy(self, juiz_email: str, nota: float, atleta: str = "vermelho") -> dict:
+        """Registra nota de PRECISÃO de um juiz"""
+        if not 0 <= nota <= 4:
+            raise ValueError("Nota de Accuracy deve estar entre 0 e 4.00")
         
         if atleta not in ["vermelho", "azul"]:
             raise ValueError("Atleta deve ser 'vermelho' ou 'azul'")
         
-        if juiz_email in self.notas_por_atleta[atleta]:
-            raise ValueError(f"Juiz {juiz_email} já enviou nota para {atleta}")
+        if juiz_email in self.accuracy_por_atleta[atleta]:
+            raise ValueError(f"Juiz {juiz_email} já enviou accuracy para {atleta}")
         
-        self.notas_por_atleta[atleta][juiz_email] = nota
+        self.accuracy_por_atleta[atleta][juiz_email] = nota
         
-        # Verificar se todos os juízes votaram para este atleta
-        votos_atleta = len(self.notas_por_atleta[atleta])
-        completo_atleta = votos_atleta == self.numero_juizes
-        
-        # Verificar se ambos os atletas têm todas as notas
-        completo_ambos = (
-            len(self.notas_por_atleta["vermelho"]) == self.numero_juizes and
-            len(self.notas_por_atleta["azul"]) == self.numero_juizes
-        )
-        
+        votos = len(self.accuracy_por_atleta[atleta])
         return {
             "atleta": atleta,
             "juiz": juiz_email,
             "nota_registrada": nota,
-            "votos_para_atleta": votos_atleta,
+            "votos_para_atleta": votos,
             "votos_esperados": self.numero_juizes,
-            "completo_atleta": completo_atleta,
-            "completo_ambos": completo_ambos
+            "accuracy_completo": votos == self.numero_juizes
+        }
+    
+    def registrar_apresentacao(self, juiz_email: str, velocidade: float, ritmo: float, 
+                               expressao: float, atleta: str = "vermelho") -> dict:
+        """Registra notas de APRESENTAÇÃO de um juiz (3 quesitos 0-2.00)"""
+        if not (0 <= velocidade <= 2 and 0 <= ritmo <= 2 and 0 <= expressao <= 2):
+            raise ValueError("Notas de Apresentação devem estar entre 0 e 2.00")
+        
+        if atleta not in ["vermelho", "azul"]:
+            raise ValueError("Atleta deve ser 'vermelho' ou 'azul'")
+        
+        if juiz_email in self.apresentacao_por_atleta[atleta]:
+            raise ValueError(f"Juiz {juiz_email} já enviou apresentação para {atleta}")
+        
+        self.apresentacao_por_atleta[atleta][juiz_email] = {
+            "velocidade": velocidade,
+            "ritmo": ritmo,
+            "expressao": expressao,
+            "total": velocidade + ritmo + expressao
+        }
+        
+        votos = len(self.apresentacao_por_atleta[atleta])
+        return {
+            "atleta": atleta,
+            "juiz": juiz_email,
+            "velocidade": velocidade,
+            "ritmo": ritmo,
+            "expressao": expressao,
+            "votos_para_atleta": votos,
+            "votos_esperados": self.numero_juizes,
+            "apresentacao_completo": votos == self.numero_juizes
         }
     
     def todas_notas_recebidas(self) -> bool:
-        """Verifica se todos os juízes enviaram notas para AMBOS atletas"""
+        """Verifica se ACCURACY E APRESENTAÇÃO estão completos para AMBOS atletas"""
         return (
-            len(self.notas_por_atleta["vermelho"]) == self.numero_juizes and
-            len(self.notas_por_atleta["azul"]) == self.numero_juizes
+            len(self.accuracy_por_atleta["vermelho"]) == self.numero_juizes and
+            len(self.accuracy_por_atleta["azul"]) == self.numero_juizes and
+            len(self.apresentacao_por_atleta["vermelho"]) == self.numero_juizes and
+            len(self.apresentacao_por_atleta["azul"]) == self.numero_juizes
         )
     
     def tempo_expirou(self) -> bool:
@@ -144,91 +183,95 @@ class PoomsaeScoring:
         decorrido = (datetime.utcnow() - self.tempo_inicio).total_seconds()
         return decorrido > self.timeout_segundos
     
-    def calcular_nota_final(self, atleta: str) -> Optional[float]:
+    def calcular_media_por_quesito(self, quesito_values: list) -> float:
         """
-        Calcula a nota final descartando maior e menor nota.
-        Retorna a média aritmética das notas restantes.
+        Calcula média descartando maior e menor.
+        Para 1-2 juízes, não descarta. Para 3+, descarta extremos.
         """
-        if not self.todas_notas_recebidas():
-            return None
+        if len(quesito_values) == 0:
+            return 0.0
         
-        notas = list(self.notas_por_atleta[atleta].values())
+        if len(quesito_values) == 1:
+            return round(quesito_values[0], 2)
         
-        if len(notas) < 1:
-            return None
+        if len(quesito_values) == 2:
+            return round(statistics.mean(quesito_values), 2)
         
-        if len(notas) == 1:
-            # Com 1 juiz, não descarta nada
-            return round(notas[0], 2)
-        
-        if len(notas) == 2:
-            # Com 2 juízes, não descarta nada (faz a média simples)
-            media = statistics.mean(notas)
-            return round(media, 2)
-        
-        # Com 3+: Descartar nota mais alta e mais baixa
-        notas_ordenadas = sorted(notas)
-        notas_validas = notas_ordenadas[1:-1]  # Remove primeira e última
-        
-        if not notas_validas:
-            return None
-        
-        media = statistics.mean(notas_validas)
-        return round(media, 2)
+        # 3+ juízes: descartar extremos
+        ordenados = sorted(quesito_values)
+        validos = ordenados[1:-1]
+        return round(statistics.mean(validos), 2)
     
     def computar_notas_finais(self) -> bool:
         """Computa as notas finais para ambos atletas"""
         if not self.todas_notas_recebidas():
             return False
         
-        self.nota_final_vermelho = self.calcular_nota_final("vermelho")
-        self.nota_final_azul = self.calcular_nota_final("azul")
+        for atleta in ["vermelho", "azul"]:
+            # Calcular ACCURACY média
+            accuracy_values = list(self.accuracy_por_atleta[atleta].values())
+            accuracy_final = self.calcular_media_por_quesito(accuracy_values)
+            
+            # Calcular APRESENTAÇÃO média (por quesito)
+            apresentacao_values = list(self.apresentacao_por_atleta[atleta].values())
+            
+            velocidade_vals = [ap["velocidade"] for ap in apresentacao_values]
+            ritmo_vals = [ap["ritmo"] for ap in apresentacao_values]
+            expressao_vals = [ap["expressao"] for ap in apresentacao_values]
+            
+            velocidade_final = self.calcular_media_por_quesito(velocidade_vals)
+            ritmo_final = self.calcular_media_por_quesito(ritmo_vals)
+            expressao_final = self.calcular_media_por_quesito(expressao_vals)
+            
+            apresentacao_total = velocidade_final + ritmo_final + expressao_final
+            
+            # NOTA FINAL = ACCURACY + APRESENTAÇÃO
+            nota_final = round(accuracy_final + apresentacao_total, 2)
+            
+            self.notas_finais[atleta] = {
+                "accuracy": accuracy_final,
+                "apresentacao": apresentacao_total,
+                "velocidade": velocidade_final,
+                "ritmo": ritmo_final,
+                "expressao": expressao_final,
+                "total": nota_final
+            }
         
         return True
     
     def gerar_relatorio(self) -> dict:
-        """Gera relatório completo da pontuação"""
+        """Gera relatório completo"""
         if not self.todas_notas_recebidas():
-            return {
-                "status": "incompleto",
-                "notas_vermelho": len(self.notas_por_atleta["vermelho"]),
-                "notas_azul": len(self.notas_por_atleta["azul"]),
-                "notas_esperadas": self.numero_juizes
-            }
+            return {"status": "incompleto"}
         
-        # Computar se não foi feito ainda
-        if self.nota_final_vermelho is None or self.nota_final_azul is None:
+        if not self.notas_finais:
             self.computar_notas_finais()
         
-        notas_verm = list(self.notas_por_atleta["vermelho"].values())
-        notas_azul = list(self.notas_por_atleta["azul"].values())
+        nota_verm = self.notas_finais.get("vermelho", {}).get("total", 0)
+        nota_azul = self.notas_finais.get("azul", {}).get("total", 0)
         
         vencedor = None
-        if self.nota_final_vermelho > self.nota_final_azul:
+        if nota_verm > nota_azul:
             vencedor = "vermelho"
-        elif self.nota_final_azul > self.nota_final_vermelho:
+        elif nota_azul > nota_verm:
             vencedor = "azul"
         else:
             vencedor = "empate"
         
         return {
             "status": "completo",
-            "notas_vermelho": self.notas_por_atleta["vermelho"],
-            "notas_azul": self.notas_por_atleta["azul"],
-            "nota_final_vermelho": self.nota_final_vermelho,
-            "nota_final_azul": self.nota_final_azul,
+            "nota_final_vermelho": nota_verm,
+            "nota_final_azul": nota_azul,
+            "notas": {
+                "vermelho": self.notas_finais.get("vermelho", {}),
+                "azul": self.notas_finais.get("azul", {})
+            },
             "vencedor": vencedor,
             "detalhes": {
-                "vermelho": {
-                    "minima": min(notas_verm) if notas_verm else None,
-                    "maxima": max(notas_verm) if notas_verm else None,
-                    "total_notas": len(notas_verm)
-                },
-                "azul": {
-                    "minima": min(notas_azul) if notas_azul else None,
-                    "maxima": max(notas_azul) if notas_azul else None,
-                    "total_notas": len(notas_azul)
-                }
+                "accuracy_vermelho": list(self.accuracy_por_atleta["vermelho"].values()),
+                "accuracy_azul": list(self.accuracy_por_atleta["azul"].values()),
+                "apresentacao_vermelho": list(self.apresentacao_por_atleta["vermelho"].values()),
+                "apresentacao_azul": list(self.apresentacao_por_atleta["azul"].values())
             }
         }
 
@@ -305,15 +348,19 @@ class JoystickManager:
     def registrar_nota_poomsae(self, luta_id: str, juiz_email: str, nota: float, atleta: str = "vermelho") -> dict:
         """
         Registra nota de um juiz para Poomsae (atleta específico).
+        DESCONTINUADO: Use registrar_accuracy_poomsae e registrar_apresentacao_poomsae
+        """
+        raise NotImplementedError("Use registrar_accuracy_poomsae ou registrar_apresentacao_poomsae")
+    
+    def registrar_accuracy_poomsae(self, luta_id: str, juiz_email: str, nota: float, atleta: str = "vermelho") -> dict:
+        """
+        Registra nota de PRECISÃO (ACCURACY) de um juiz para Poomsae.
         
         Args:
             luta_id: ID da luta
             juiz_email: Email do juiz
-            nota: Nota (0-10)
+            nota: Nota de accuracy (0-4.00)
             atleta: "vermelho" (Chong) ou "azul" (Hong)
-            
-        Retorna:
-            status e resultado final se completo para ambos atletas
         """
         if luta_id not in self.poomsaes_ativas:
             raise ValueError(f"Sessão de Poomsae não encontrada para luta {luta_id}")
@@ -323,21 +370,59 @@ class JoystickManager:
         if sessao.tempo_expirou():
             raise ValueError("Tempo limite para envio de notas foi ultrapassado")
         
-        # Registrar nota
-        resultado_registro = sessao.registrar_nota(juiz_email, nota, atleta)
+        resultado = sessao.registrar_accuracy(juiz_email, nota, atleta)
         
-        response = {
+        return {
+            "tipo": "accuracy_registrada",
             "luta_id": luta_id,
             "juiz_email": juiz_email,
             "atleta": atleta,
-            "nota_registrada": nota,
-            "votos_para_atleta": resultado_registro["votos_para_atleta"],
+            "nota_accuracy": nota,
+            "votos_para_atleta": resultado["votos_para_atleta"],
             "votos_esperados": sessao.numero_juizes,
-            "status": "em_espera"
+            "accuracy_completo": resultado["accuracy_completo"],
+            "status": "accuracy_registrada"
+        }
+    
+    def registrar_apresentacao_poomsae(self, luta_id: str, juiz_email: str, velocidade: float, 
+                                       ritmo: float, expressao: float, atleta: str = "vermelho") -> dict:
+        """
+        Registra nota de APRESENTAÇÃO de um juiz para Poomsae.
+        
+        Args:
+            luta_id: ID da luta
+            juiz_email: Email do juiz
+            velocidade: Nota de velocidade (0-2.00)
+            ritmo: Nota de ritmo (0-2.00)
+            expressao: Nota de expressão (0-2.00)
+            atleta: "vermelho" ou "azul"
+        """
+        if luta_id not in self.poomsaes_ativas:
+            raise ValueError(f"Sessão de Poomsae não encontrada para luta {luta_id}")
+        
+        sessao = self.poomsaes_ativas[luta_id]
+        
+        if sessao.tempo_expirou():
+            raise ValueError("Tempo limite para envio de notas foi ultrapassado")
+        
+        resultado = sessao.registrar_apresentacao(juiz_email, velocidade, ritmo, expressao, atleta)
+        
+        response = {
+            "tipo": "apresentacao_registrada",
+            "luta_id": luta_id,
+            "juiz_email": juiz_email,
+            "atleta": atleta,
+            "velocidade": velocidade,
+            "ritmo": ritmo,
+            "expressao": expressao,
+            "votos_para_atleta": resultado["votos_para_atleta"],
+            "votos_esperados": sessao.numero_juizes,
+            "apresentacao_completo": resultado["apresentacao_completo"],
+            "status": "apresentacao_registrada"
         }
         
-        # Se todas as notas foram recebidas para AMBOS atletas, calcular resultado
-        if resultado_registro["completo_ambos"]:
+        # Se TODAS as notas foram recebidas (accuracy + apresentação para ambos atletas)
+        if sessao.todas_notas_recebidas():
             sessao.computar_notas_finais()
             response["status"] = "completo"
             response["relatorio"] = sessao.gerar_relatorio()
