@@ -1,7 +1,8 @@
 """
 Rotas de Usuários (Perfil, Senha, Preferências)
 """
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Query
+from fastapi.responses import FileResponse, StreamingResponse
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from datetime import datetime
 from models.user import (
@@ -12,6 +13,7 @@ from models.user import (
     UpdateRoleData
 )
 from services.auth_service import verify_password, get_password_hash
+from services.certificate_service import CertificateService
 from database.connection import get_db
 from bson.objectid import ObjectId
 
@@ -124,3 +126,135 @@ async def listar_arbitros_disponiveis(db: AsyncIOMotorDatabase = Depends(get_db)
         lista.append({"email": u["email"], "nome": nome_completo})
         
     return lista
+
+
+# ========== PHASE 3: ATHLETE CAREER & CERTIFICATES ==========
+
+@router.get("/meu-perfil/carreira")
+async def obter_carreira_atleta(email: str = Query(...), db: AsyncIOMotorDatabase = Depends(get_db)):
+    """
+    Retorna histórico de carreira do atleta
+    Query params: email=athlete@example.com
+    """
+    # Find all results for this athlete
+    resultados = await db.resultados.find(
+        {"atleta_email": email}
+    ).sort("data_luta", -1).to_list(1000)
+    
+    if not resultados:
+        return {
+            "email": email,
+            "total_competicoes": 0,
+            "total_lutas": 0,
+            "vitoria": 0,
+            "derrotas": 0,
+            "medalhas": {"ouro": 0, "prata": 0, "bronze": 0, "participacao": 0},
+            "historico": []
+        }
+    
+    # Group by tournament
+    competicoes = {}
+    vitoria = 0
+    derrotas = 0
+    medalhas_count = {"ouro": 0, "prata": 0, "bronze": 0, "participacao": 0}
+    
+    for resultado in resultados:
+        camp_id = str(resultado.get("campeonato_id"))
+        
+        # Count wins/losses
+        if resultado.get("venceu", False):
+            vitoria += 1
+        else:
+            derrotas += 1
+        
+        # Count medals
+        medalha = resultado.get("medalha", "participacao")
+        medalhas_count[medalha] = medalhas_count.get(medalha, 0) + 1
+        
+        # Group by competition
+        if camp_id not in competicoes:
+            competicoes[camp_id] = {
+                "campeonato_id": camp_id,
+                "campeonato_nome": resultado.get("categoria_id", "Campeonato"),
+                "lutas": []
+            }
+        
+        competicoes[camp_id]["lutas"].append({
+            "luta_id": resultado.get("luta_id"),
+            "adversario": resultado.get("adversario_nome"),
+            "categoria": resultado.get("categoria_id"),
+            "modalidade": resultado.get("modalidade"),
+            "resultado": "Vitória" if resultado.get("venceu", False) else "Derrota",
+            "placar": {
+                "seu_placar": resultado.get("placar_final"),
+                "placar_adversario": resultado.get("placar_adversario")
+            },
+            "medalha": medalha,
+            "data": resultado.get("data_luta").isoformat() if resultado.get("data_luta") else None
+        })
+    
+    return {
+        "email": email,
+        "total_competicoes": len(competicoes),
+        "total_lutas": len(resultados),
+        "vitorias": vitoria,
+        "derrotas": derrotas,
+        "taxa_vitoria": f"{(vitoria / len(resultados) * 100):.1f}%" if len(resultados) > 0 else "0%",
+        "medalhas": medalhas_count,
+        "historico": list(competicoes.values())
+    }
+
+
+@router.get("/meu-perfil/certificado/{campeonato_id}")
+async def baixar_certificado(
+    campeonato_id: str,
+    email: str = Query(...),
+    db: AsyncIOMotorDatabase = Depends(get_db)
+):
+    """
+    Gera e retorna certificado PDF de participação
+    Query params: email=athlete@example.com
+    """
+    try:
+        # Find athlete's best result in this tournament
+        resultado = await db.resultados.find_one({
+            "atleta_email": email,
+            "campeonato_id": campeonato_id
+        })
+        
+        if not resultado:
+            raise HTTPException(status_code=404, detail="Nenhuma participação encontrada neste campeonato")
+        
+        # Get tournament info
+        campeonato = await db.campeonatos.find_one({"_id": ObjectId(campeonato_id)})
+        if not campeonato:
+            raise HTTPException(status_code=404, detail="Campeonato não encontrado")
+        
+        # Get athlete info
+        usuario = await db.users.find_one({"email": email})
+        if not usuario:
+            raise HTTPException(status_code=404, detail="Usuário não encontrado")
+        
+        # Generate certificate
+        atleta_nome = f"{usuario.get('nome', '')} {usuario.get('sobrenome', '')}".strip()
+        
+        pdf_buffer = CertificateService.gerar_certificado_participacao(
+            atleta_nome=atleta_nome,
+            atleta_email=email,
+            campeonato_nome=campeonato.get("nome", "Campeonato"),
+            data_evento=campeonato.get("data_inicio", datetime.now()),
+            categoria=resultado.get("categoria_id", "Geral"),
+            modalidade=resultado.get("modalidade", "Taekwondo"),
+            medalha=resultado.get("medalha", "participacao")
+        )
+        
+        # Return as downloadable file
+        return StreamingResponse(
+            iter([pdf_buffer.getvalue()]),
+            media_type="application/pdf",
+            headers={"Content-Disposition": f"attachment; filename=certificado_{email.split('@')[0]}.pdf"}
+        )
+    
+    except Exception as e:
+        print(f"Erro ao gerar certificado: {e}")
+        raise HTTPException(status_code=500, detail=f"Erro ao gerar certificado: {str(e)}")
