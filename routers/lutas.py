@@ -3,7 +3,7 @@ Rotas de Lutas (Geração de Chaves, Cronograma, Lutas)
 """
 import math
 import random
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Query
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from datetime import datetime, timedelta
 from bson.objectid import ObjectId
@@ -63,6 +63,7 @@ async def gerar_chaves(camp_id: str, dados: GerarChavesData, db: AsyncIOMotorDat
         atleta_nome = mapa_usuarios.get(insc["atleta_email"], "Atleta Desconhecido")
         categorias_dict[cat_id].append({
             "inscricao_id": str(insc["_id"]), 
+            "email": insc["atleta_email"],  # ← ADD: Store athlete email
             "nome": atleta_nome,
             "data": insc.get("data_inscricao", "")
         })
@@ -98,20 +99,39 @@ async def gerar_chaves(camp_id: str, dados: GerarChavesData, db: AsyncIOMotorDat
             
             # Cabeças de chave ganham BYE
             for atleta in cabecas_de_chave:
-                pares.append((atleta["nome"], "BYE (Avança Direto)"))
+                pares.append((atleta, "BYE"))
             
             # Lutas reais dos restantes
             for i in range(0, len(restantes), 2):
                 if i + 1 < len(restantes):
-                    pares.append((restantes[i]["nome"], restantes[i+1]["nome"]))
+                    pares.append((restantes[i], restantes[i+1]))
                 else:
-                    pares.append((restantes[i]["nome"], "BYE (Avança Direto)")) 
+                    pares.append((restantes[i], {"nome": "BYE (Avança Direto)", "email": None})) 
 
             # Salva os pares
             for vermelho, azul in pares:
+                # Handle BYE case
+                if vermelho == "BYE":
+                    vermelho_nome = "BYE (Avança Direto)"
+                    vermelho_email = None
+                else:
+                    vermelho_nome = vermelho["nome"]
+                    vermelho_email = vermelho["email"]
+                
+                if isinstance(azul, dict) and azul.get("nome") == "BYE (Avança Direto)":
+                    azul_nome = "BYE (Avança Direto)"
+                    azul_email = None
+                else:
+                    azul_nome = azul["nome"]
+                    azul_email = azul["email"]
+                
                 luta = {
                     "campeonato_id": camp_id, "categoria_id": cat_id, "modalidade": "Kyorugui",
-                    "ordem_luta": ordem_geral, "atleta_vermelho": vermelho, "atleta_azul": azul,
+                    "ordem_luta": ordem_geral, 
+                    "atleta_vermelho_email": vermelho_email,  # ← NEW
+                    "atleta_vermelho": vermelho_nome,  # Keep for backward compatibility
+                    "atleta_azul_email": azul_email,  # ← NEW
+                    "atleta_azul": azul_nome,  # Keep for backward compatibility
                     "status": "Aguardando Chamada"
                 }
                 lutas_geradas.append(luta)
@@ -122,6 +142,7 @@ async def gerar_chaves(camp_id: str, dados: GerarChavesData, db: AsyncIOMotorDat
                 apresentacao = {
                     "campeonato_id": camp_id, "categoria_id": cat_id, "modalidade": "Poomsae",
                     "ordem_luta": ordem_geral, "ordem_apresentacao": i + 1,
+                    "atleta_email": atleta["email"],  # ← NEW
                     "atleta": atleta["nome"], "status": "Aguardando Chamada"
                 }
                 lutas_geradas.append(apresentacao)
@@ -176,7 +197,11 @@ async def gerar_cronograma(camp_id: str, config: ConfigCronograma, db: AsyncIOMo
         cat_id = insc["categoria_id"]
         if cat_id not in categorias_dict:
             categorias_dict[cat_id] = {"atletas": [], "modalidade": insc["modalidade"]}
-        categorias_dict[cat_id]["atletas"].append({"nome": mapa_usuarios.get(insc["atleta_email"], "Desconhecido"), "data": insc.get("data_inscricao", "")})
+        categorias_dict[cat_id]["atletas"].append({
+            "email": insc["atleta_email"],  # ← NEW
+            "nome": mapa_usuarios.get(insc["atleta_email"], "Desconhecido"), 
+            "data": insc.get("data_inscricao", "")
+        })
 
     todas_as_lutas_geradas = []
 
@@ -199,7 +224,10 @@ async def gerar_cronograma(camp_id: str, config: ConfigCronograma, db: AsyncIOMo
             if N == 1:
                 todas_as_lutas_geradas.append({
                     "campeonato_id": camp_id, "categoria_id": cat_id, "modalidade": "Kyorugui",
-                    "atleta_vermelho": atletas[0]["nome"], "atleta_azul": "Sem Oponente (Ouro)",
+                    "atleta_vermelho_email": atletas[0]["email"],  # ← NEW
+                    "atleta_vermelho": atletas[0]["nome"], 
+                    "atleta_azul_email": None,  # ← NEW
+                    "atleta_azul": "Sem Oponente (Ouro)",
                     "status": "Encerrado", "duracao_min": duracao
                 })
                 continue
@@ -212,14 +240,23 @@ async def gerar_cronograma(camp_id: str, config: ConfigCronograma, db: AsyncIOMo
             for atleta in cabecas_de_chave:
                 todas_as_lutas_geradas.append({
                     "campeonato_id": camp_id, "categoria_id": cat_id, "modalidade": "Kyorugui",
-                    "atleta_vermelho": atleta["nome"], "atleta_azul": "BYE (Avança Direto)",
+                    "atleta_vermelho_email": atleta["email"],  # ← NEW
+                    "atleta_vermelho": atleta["nome"], 
+                    "atleta_azul_email": None,  # ← NEW
+                    "atleta_azul": "BYE (Avança Direto)",
                     "status": "Aguardando Chamada", "duracao_min": duracao
                 })
             for i in range(0, len(restantes), 2):
-                azul = restantes[i+1]["nome"] if i+1 < len(restantes) else "BYE (Avança Direto)"
+                azul_atleta = restantes[i+1] if i+1 < len(restantes) else None
+                azul_nome = azul_atleta["nome"] if azul_atleta else "BYE (Avança Direto)"
+                azul_email = azul_atleta["email"] if azul_atleta else None
+                
                 todas_as_lutas_geradas.append({
                     "campeonato_id": camp_id, "categoria_id": cat_id, "modalidade": "Kyorugui",
-                    "atleta_vermelho": restantes[i]["nome"], "atleta_azul": azul,
+                    "atleta_vermelho_email": restantes[i]["email"],  # ← NEW
+                    "atleta_vermelho": restantes[i]["nome"], 
+                    "atleta_azul_email": azul_email,  # ← NEW
+                    "atleta_azul": azul_nome,
                     "status": "Aguardando Chamada", "duracao_min": duracao
                 })
         else:  # ✅ POOMSAE - Criar chaves 1v1 (Chong vs Hong)
@@ -232,7 +269,9 @@ async def gerar_cronograma(camp_id: str, config: ConfigCronograma, db: AsyncIOMo
                     # Par completo: Chong e Hong
                     todas_as_lutas_geradas.append({
                         "campeonato_id": camp_id, "categoria_id": cat_id, "modalidade": "Poomsae",
+                        "atleta_vermelho_email": atletas[i]["email"],  # ← NEW
                         "atleta_vermelho": atletas[i]["nome"],      # Chong (Vermelho)
+                        "atleta_azul_email": atletas[i+1]["email"],  # ← NEW
                         "atleta_azul": atletas[i+1]["nome"],        # Hong (Azul)
                         "status": "Aguardando Chamada", "duracao_min": duracao
                     })
@@ -240,7 +279,9 @@ async def gerar_cronograma(camp_id: str, config: ConfigCronograma, db: AsyncIOMo
                     # Atleta impar (só apresenta, sem oponente)
                     todas_as_lutas_geradas.append({
                         "campeonato_id": camp_id, "categoria_id": cat_id, "modalidade": "Poomsae",
+                        "atleta_vermelho_email": atletas[i]["email"],  # ← NEW
                         "atleta_vermelho": atletas[i]["nome"],
+                        "atleta_azul_email": None,  # ← NEW
                         "atleta_azul": "BYE (Avança Direto)",
                         "status": "Aguardando Chamada", "duracao_min": duracao
                     })
@@ -408,6 +449,64 @@ async def finalizar_luta_banco(luta_id: str, dados: FinalizarLutaData, db: Async
     if resultado.matched_count == 0:
         raise HTTPException(status_code=404, detail="Luta não encontrada.")
     
+    # ✅ CRIAR REGISTRO NO resultados (Phase 1 - Athlete Identification)
+    if luta_atual.get("atleta_vermelho_email") or luta_atual.get("atleta_azul_email"):
+        # Determinar vencedor e perdedor
+        if dados.vencedor == "red":
+            vencedor_email = luta_atual.get("atleta_vermelho_email")
+            vencedor_nome = luta_atual.get("atleta_vermelho")
+            perdedor_email = luta_atual.get("atleta_azul_email")
+            perdedor_nome = luta_atual.get("atleta_azul")
+            placar_vencedor = dados.placar_red
+            placar_perdedor = dados.placar_blue
+        else:
+            vencedor_email = luta_atual.get("atleta_azul_email")
+            vencedor_nome = luta_atual.get("atleta_azul")
+            perdedor_email = luta_atual.get("atleta_vermelho_email")
+            perdedor_nome = luta_atual.get("atleta_vermelho")
+            placar_vencedor = dados.placar_blue
+            placar_perdedor = dados.placar_red
+        
+        # Inserir resultado para o vencedor
+        if vencedor_email:
+            resultado_vencedor = {
+                "campeonato_id": luta_atual.get("campeonato_id"),
+                "luta_id": str(luta_id),
+                "atleta_email": vencedor_email,
+                "atleta_nome": vencedor_nome,
+                "categoria_id": luta_atual.get("categoria_id"),
+                "modalidade": luta_atual.get("modalidade"),
+                "adversario_email": perdedor_email,
+                "adversario_nome": perdedor_nome,
+                "medalha": "participacao",  # Will be updated when medal determination happens
+                "placar_final": placar_vencedor,
+                "placar_adversario": placar_perdedor,
+                "venceu": True,
+                "data_luta": datetime.utcnow(),
+                "timestamp_criacao": datetime.utcnow()
+            }
+            await db.resultados.insert_one(resultado_vencedor)
+        
+        # Inserir resultado para o perdedor (se não for BYE)
+        if perdedor_email:
+            resultado_perdedor = {
+                "campeonato_id": luta_atual.get("campeonato_id"),
+                "luta_id": str(luta_id),
+                "atleta_email": perdedor_email,
+                "atleta_nome": perdedor_nome,
+                "categoria_id": luta_atual.get("categoria_id"),
+                "modalidade": luta_atual.get("modalidade"),
+                "adversario_email": vencedor_email,
+                "adversario_nome": vencedor_nome,
+                "medalha": "participacao",
+                "placar_final": placar_perdedor,
+                "placar_adversario": placar_vencedor,
+                "venceu": False,
+                "data_luta": datetime.utcnow(),
+                "timestamp_criacao": datetime.utcnow()
+            }
+            await db.resultados.insert_one(resultado_perdedor)
+    
     # 📺 NOTIFICAR LIVE QUE LUTA FOI ENCERRADA
     campeonato_id = luta_atual.get("campeonato_id")
     if campeonato_id:
@@ -535,3 +634,166 @@ async def obter_luta_atual_por_token(token: str, db: AsyncIOMotorDatabase = Depe
             "campeonato_id": quadra["campeonato_id"],
             "mensagem": f"Erro ao buscar luta: {str(e)}"
         }
+
+
+# ✅ PHASE 1: ATHLETE ENDPOINTS (Athlete Identification)
+
+@router.get("/meu-perfil/minhas-lutas")
+async def minhas_lutas(email: str = Query(..., description="Athlete email"), db: AsyncIOMotorDatabase = Depends(get_db)):
+    """
+    Retorna todas as lutas do atleta (Kyorugui, Poomsae).
+    Query parameter: email=user@example.com
+    
+    Resposta inclui:
+    - Próximas lutas (status != Encerrada)
+    - Lutas concluídas (status == Encerrada)
+    - Resultado final se luta terminou
+    """
+    try:
+        # Buscar todas as lutas onde o atleta participou (Kyorugui)
+        lutas_kyorugui = await db.lutas.find({
+            "$or": [
+                {"atleta_vermelho_email": email},
+                {"atleta_azul_email": email}
+            ],
+            "modalidade": "Kyorugui"
+        }).sort("ordem_luta", 1).to_list(length=500)
+        
+        # Buscar todas as lutas Poomsae onde o atleta participou
+        lutas_poomsae = await db.lutas.find({
+            "atleta_vermelho_email": email,
+            "modalidade": "Poomsae"
+        }).sort("ordem_luta", 1).to_list(length=500)
+        
+        resultado = []
+        
+        # Processar Kyorugui
+        for luta in lutas_kyorugui:
+            sou_vermelho = luta.get("atleta_vermelho_email") == email
+            resultado.append({
+                "luta_id": str(luta["_id"]),
+                "campeonato_id": luta.get("campeonato_id"),
+                "categoria": luta.get("nome_categoria", "N/A"),
+                "modalidade": "Kyorugui",
+                "meu_lado": "vermelho" if sou_vermelho else "azul",
+                "meu_nome": luta.get("atleta_vermelho") if sou_vermelho else luta.get("atleta_azul"),
+                "adversario_nome": luta.get("atleta_azul") if sou_vermelho else luta.get("atleta_vermelho"),
+                "adversario_email": luta.get("atleta_azul_email") if sou_vermelho else luta.get("atleta_vermelho_email"),
+                "status": luta.get("status"),
+                "quadra": luta.get("quadra", "N/A"),
+                "ordem_luta": luta.get("ordem_luta"),
+                "resultado": {
+                    "vencedor": luta.get("vencedor"),
+                    "placar_meu": luta.get("placar_red") if sou_vermelho else luta.get("placar_blue"),
+                    "placar_adversario": luta.get("placar_blue") if sou_vermelho else luta.get("placar_red"),
+                    "faltas_minhas": luta.get("faltas_red") if sou_vermelho else luta.get("faltas_blue"),
+                    "faltas_adversario": luta.get("faltas_blue") if sou_vermelho else luta.get("faltas_red"),
+                } if luta.get("status") == "Encerrada" else None
+            })
+        
+        # Processar Poomsae
+        for luta in lutas_poomsae:
+            resultado.append({
+                "luta_id": str(luta["_id"]),
+                "campeonato_id": luta.get("campeonato_id"),
+                "categoria": luta.get("nome_categoria", "N/A"),
+                "modalidade": "Poomsae",
+                "meu_lado": "vermelho",
+                "meu_nome": luta.get("atleta_vermelho"),
+                "adversario_nome": luta.get("atleta_azul"),
+                "adversario_email": luta.get("atleta_azul_email"),
+                "status": luta.get("status"),
+                "quadra": luta.get("quadra", "N/A"),
+                "ordem_luta": luta.get("ordem_luta"),
+                "turno_poomsae": luta.get("turno_poomsae"),
+                "resultado": {
+                    "placar_meu": luta.get("placar_red"),
+                    "placar_adversario": luta.get("placar_blue"),
+                } if luta.get("status") == "Encerrada" else None
+            })
+        
+        # Ordenar por ordem_luta
+        resultado.sort(key=lambda x: x.get("ordem_luta", 999))
+        
+        return {
+            "email_atleta": email,
+            "total_lutas": len(resultado),
+            "lutas": resultado
+        }
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erro ao buscar lutas: {str(e)}")
+
+
+@router.get("/lutas/{luta_id}/resultado")
+async def obter_resultado_luta(luta_id: str, email: str = Query(...), db: AsyncIOMotorDatabase = Depends(get_db)):
+    """
+    Retorna resultado de uma luta específica para o atleta.
+    Valida que o email pertence a um dos atletas da luta.
+    
+    Query: /api/lutas/507f1f77bcf86cd799439011/resultado?email=athlete@example.com
+    """
+    try:
+        # Buscar a luta
+        luta = await db.lutas.find_one({"_id": ObjectId(luta_id)})
+        
+        if not luta:
+            raise HTTPException(status_code=404, detail="Luta não encontrada")
+        
+        # Verificar se email está na luta (Kyorugui e Poomsae)
+        sou_vermelho = luta.get("atleta_vermelho_email") == email
+        sou_azul = luta.get("atleta_azul_email") == email
+        
+        if not sou_vermelho and not sou_azul:
+            raise HTTPException(status_code=403, detail="Acesso negado - você não participa desta luta")
+        
+        # Se luta ainda não encerrou, retornar status apenas
+        if luta.get("status") != "Encerrada":
+            return {
+                "luta_id": str(luta["_id"]),
+                "campeonato_id": luta.get("campeonato_id"),
+                "categoria": luta.get("nome_categoria", "N/A"),
+                "modalidade": luta.get("modalidade"),
+                "meu_lado": "vermelho" if sou_vermelho else "azul",
+                "meu_nome": luta.get("atleta_vermelho") if sou_vermelho else luta.get("atleta_azul"),
+                "adversario_nome": luta.get("atleta_azul") if sou_vermelho else luta.get("atleta_vermelho"),
+                "adversario_email": luta.get("atleta_azul_email") if sou_vermelho else luta.get("atleta_vermelho_email"),
+                "status": luta.get("status"),
+                "quadra": luta.get("quadra", "N/A"),
+                "resultado": None
+            }
+        
+        # Buscar resultado na coleção resultados
+        resultado_doc = await db.resultados.find_one({"luta_id": str(luta_id), "atleta_email": email})
+        
+        meu_placar = luta.get("placar_red") if sou_vermelho else luta.get("placar_blue")
+        placar_adversario = luta.get("placar_blue") if sou_vermelho else luta.get("placar_red")
+        faltas_minhas = luta.get("faltas_red") if sou_vermelho else luta.get("faltas_blue")
+        faltas_adversario = luta.get("faltas_blue") if sou_vermelho else luta.get("faltas_red")
+        
+        return {
+            "luta_id": str(luta["_id"]),
+            "campeonato_id": luta.get("campeonato_id"),
+            "categoria": luta.get("nome_categoria", "N/A"),
+            "modalidade": luta.get("modalidade"),
+            "meu_lado": "vermelho" if sou_vermelho else "azul",
+            "meu_nome": luta.get("atleta_vermelho") if sou_vermelho else luta.get("atleta_azul"),
+            "adversario_nome": luta.get("atleta_azul") if sou_vermelho else luta.get("atleta_vermelho"),
+            "adversario_email": luta.get("atleta_azul_email") if sou_vermelho else luta.get("atleta_vermelho_email"),
+            "status": "Encerrada",
+            "quadra": luta.get("quadra", "N/A"),
+            "resultado": {
+                "vencedor": luta.get("vencedor"),
+                "venci": resultado_doc.get("venceu") if resultado_doc else (luta.get("vencedor") == ("red" if sou_vermelho else "blue")),
+                "meu_placar": meu_placar,
+                "placar_adversario": placar_adversario,
+                "minhas_faltas": faltas_minhas,
+                "faltas_adversario": faltas_adversario,
+                "medalha": resultado_doc.get("medalha") if resultado_doc else "participacao"
+            }
+        }
+    
+    except ObjectId as e:
+        raise HTTPException(status_code=400, detail="ID da luta inválido")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erro ao buscar resultado: {str(e)}")
