@@ -10,5 +10,6 @@ from . import lutas
 from . import arbitros
 from . import quadras
 from . import joystick
+from . import noticias
 
-__all__ = ["auth", "users", "campeonatos", "uploads", "inscricoes", "lutas", "arbitros", "quadras", "joystick"]
+__all__ = ["auth", "users", "campeonatos", "uploads", "inscricoes", "lutas", "arbitros", "quadras", "joystick", "noticias"]
