@@ -383,6 +383,30 @@ async def obter_proxima_luta(camp_id: str, num_quadra: str, db: AsyncIOMotorData
     return luta_atualizada
 
 
+@router.get("/campeonatos/{camp_id}/quadras/{num_quadra}/luta-em-andamento")
+async def obter_luta_em_andamento(camp_id: str, num_quadra: str, db: AsyncIOMotorDatabase = Depends(get_db)):
+    """
+    Retorna a luta que já está Em Andamento nesta quadra.
+    Usado pelo mesário para reconectar sem puxar uma nova luta.
+    """
+    try:
+        num_quadra_int = int(num_quadra)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Número da quadra inválido")
+
+    luta = await db.lutas.find_one({
+        "campeonato_id": camp_id,
+        "quadra": num_quadra_int,
+        "status": "Em Andamento"
+    })
+
+    if not luta:
+        raise HTTPException(status_code=404, detail="Nenhuma luta em andamento nesta quadra.")
+
+    luta["_id"] = str(luta["_id"])
+    return luta
+
+
 @router.get("/scoreboard/access/{token}")
 async def validar_token_scoreboard(token: str, db: AsyncIOMotorDatabase = Depends(get_db)):
     """
