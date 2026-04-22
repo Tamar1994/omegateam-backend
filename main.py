@@ -21,6 +21,11 @@ from bson.objectid import ObjectId
 from routers.joystick import router as joystick_router
 from routers.arbitros import router as arbitros_router
 from routers.noticias import router as noticias_router
+from routers.poomsae_campeonatos import router as poomsae_campeonatos_router
+from routers.poomsae_atletas import router as poomsae_atletas_router
+from routers.poomsae_inscricoes import router as poomsae_inscricoes_router
+from routers.poomsae_juizes import router as poomsae_juizes_router
+from routers.poomsae_scoring import router as poomsae_scoring_router
 
 # Carrega as variáveis de ambiente do arquivo .env
 load_dotenv()
@@ -40,6 +45,11 @@ app.add_middleware(
 app.include_router(joystick_router)
 app.include_router(arbitros_router)
 app.include_router(noticias_router)
+app.include_router(poomsae_campeonatos_router)
+app.include_router(poomsae_atletas_router)
+app.include_router(poomsae_inscricoes_router)
+app.include_router(poomsae_juizes_router)
+app.include_router(poomsae_scoring_router)
 
 # Conexão com MongoDB
 MONGO_URI = os.getenv("MONGO_URI")

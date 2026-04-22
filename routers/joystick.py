@@ -1059,3 +1059,14 @@ async def notificar_laterais_luta_iniciada(luta_id: str, dados: dict, db: AsyncI
         print(f"❌ ERRO ao notificar laterais: {e}")
         print(f"{'='*60}\n")
         raise HTTPException(status_code=500, detail=f"Erro ao notificar laterais: {str(e)}")
+
+
+@router.get("/campeonatos/{camp_id}/minha-posicao-juiz/{email}")
+async def minha_posicao_juiz(camp_id: str, email: str, db: AsyncIOMotorDatabase = Depends(get_db)):
+    """Retorna o número do juiz (1-7) de um árbitro lateral com base na configuração da quadra."""
+    for i in range(1, 8):
+        campo = f"lateral{i}_email"
+        quadra = await db.quadras.find_one({"campeonato_id": camp_id, campo: email})
+        if quadra:
+            return {"numero_juiz": i, "quadra_numero": quadra.get("numero_quadra", i)}
+    raise HTTPException(status_code=404, detail="Email não encontrado como juiz neste campeonato")
