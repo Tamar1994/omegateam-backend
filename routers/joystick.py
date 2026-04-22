@@ -953,22 +953,26 @@ async def websocket_live(websocket: WebSocket, campeonato_id: str):
     """
     try:
         await manager.connect_live(campeonato_id, websocket)
-        
+
         while True:
             # Aguarda mensagens do cliente (pode ser heartbeat ou refresh request)
             try:
                 data = await websocket.receive_json()
-                
+
                 if data.get("tipo") == "refresh_request":
-                    # Cliente solicitou refresh completo - aqui ele deveria fazer HTTP GET
-                    logger.debug(f"📺 Live {campeonato_id} solicitou refresh")
-                    
-            except Exception as e:
-                # Se receber texto em vez de JSON (heartbeat), apenas ignora
+                    pass  # cliente deve fazer HTTP GET para refresh completo
+
+            except WebSocketDisconnect:
+                # Cliente desconectou — sair do loop normalmente
+                break
+            except Exception:
+                # Ignorar apenas erros de parse JSON (frame não-JSON recebido)
                 pass
-                
+
+    except WebSocketDisconnect:
+        pass  # desconexão antes de entrar no loop
     except Exception as e:
-        logger.debug(f"❌ Erro no WebSocket Live: {e}")
+        logger.debug(f"Erro no WebSocket Live: {e}")
     finally:
         manager.disconnect_live(campeonato_id, websocket)
 
