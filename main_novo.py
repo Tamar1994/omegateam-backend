@@ -13,6 +13,7 @@ from database.connection import connect_db, close_db
 
 # Importações de routers
 from routers import auth, users, campeonatos, uploads, inscricoes, lutas, arbitros, quadras, joystick, debug_websocket, debug_streaming
+from routers import poomsae_scoring, poomsae_atletas, poomsae_campeonatos, poomsae_inscricoes, poomsae_juizes
 
 # ==========================================
 # EVENTOS DE CICLO DE VIDA
@@ -76,6 +77,11 @@ app.include_router(quadras.router)
 app.include_router(joystick.router)
 app.include_router(debug_websocket.router)
 app.include_router(debug_streaming.router)
+app.include_router(poomsae_scoring.router)
+app.include_router(poomsae_atletas.router)
+app.include_router(poomsae_campeonatos.router)
+app.include_router(poomsae_inscricoes.router)
+app.include_router(poomsae_juizes.router)
 
 # ==========================================
 # ROTA DE HEALTH CHECK
