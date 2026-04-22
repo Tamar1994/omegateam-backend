@@ -73,15 +73,7 @@ def _calcular_componente(scores: List[float]) -> DetalheCalculo:
 
 async def criar_match(db: AsyncIOMotorDatabase, dados: MatchCreate) -> dict:
     """Cria um match de poomsae"""
-    camp = await db.poomsae_campeonatos.find_one({"_id": ObjectId(dados.campeonato_id)})
-    if not camp:
-        raise HTTPException(status_code=404, detail="Campeonato não encontrado")
-
-    inscricao = await db.poomsae_inscricoes.find_one({"_id": ObjectId(dados.inscricao_id)})
-    if not inscricao:
-        raise HTTPException(status_code=404, detail="Inscrição não encontrada")
-
-    doc = dados.model_dump()
+    doc = dados.model_dump(exclude={"tipo"})  # remove campo alias
     doc["status"] = StatusMatch.AGENDADO
     doc["deducoes"] = Deducoes().model_dump()
     doc["scores_juizes"] = []
@@ -95,12 +87,20 @@ async def criar_match(db: AsyncIOMotorDatabase, dados: MatchCreate) -> dict:
 
 async def listar_matches(
     db: AsyncIOMotorDatabase,
-    campeonato_id: str,
+    campeonato_id: Optional[str] = None,
+    luta_id: Optional[str] = None,
+    atleta_id: Optional[str] = None,
     divisao: Optional[str] = None,
     rodada: Optional[int] = None,
     status: Optional[str] = None,
 ) -> list:
-    filtro = {"campeonato_id": campeonato_id}
+    filtro: dict = {}
+    if campeonato_id:
+        filtro["campeonato_id"] = campeonato_id
+    if luta_id:
+        filtro["luta_id"] = luta_id
+    if atleta_id:
+        filtro["atleta_id"] = atleta_id
     if divisao:
         filtro["divisao"] = {"$regex": divisao, "$options": "i"}
     if rodada:
@@ -108,7 +108,7 @@ async def listar_matches(
     if status:
         filtro["status"] = status
 
-    cursor = db.poomsae_matches.find(filtro).sort([("rodada", 1), ("numero_match", 1)])
+    cursor = db.poomsae_matches.find(filtro).sort([("rodada", 1), ("timestamp_criacao", 1)])
     matches = await cursor.to_list(length=500)
     return [_serialize(m) for m in matches]
 
@@ -128,7 +128,7 @@ async def obter_match(db: AsyncIOMotorDatabase, match_id: str) -> dict:
 async def iniciar_match(db: AsyncIOMotorDatabase, match_id: str) -> dict:
     """Marca match como em andamento"""
     match = await obter_match(db, match_id)
-    if match["status"] != StatusMatch.AGENDADO:
+    if match["status"] not in [StatusMatch.AGENDADO, StatusMatch.EM_ANDAMENTO]:
         raise HTTPException(
             status_code=400,
             detail=f"Match com status '{match['status']}' não pode ser iniciado"

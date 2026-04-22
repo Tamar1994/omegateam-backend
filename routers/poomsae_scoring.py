@@ -29,13 +29,15 @@ async def criar_match(dados: MatchCreate, db: AsyncIOMotorDatabase = Depends(get
 
 @router.get("/matches")
 async def listar_matches(
-    campeonato_id: str,
+    campeonato_id: Optional[str] = None,
+    luta_id: Optional[str] = None,
+    atleta_id: Optional[str] = None,
     divisao: Optional[str] = None,
     rodada: Optional[int] = None,
     status: Optional[str] = None,
     db: AsyncIOMotorDatabase = Depends(get_db),
 ):
-    return await service.listar_matches(db, campeonato_id, divisao, rodada, status)
+    return await service.listar_matches(db, campeonato_id, luta_id, atleta_id, divisao, rodada, status)
 
 
 @router.get("/matches/{match_id}")

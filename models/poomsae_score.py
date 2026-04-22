@@ -150,22 +150,43 @@ class Deducoes(BaseModel):
 class MatchCreate(BaseModel):
     """Criação de um match de poomsae"""
     campeonato_id: str
-    inscricao_id: str                    # Inscrição do atleta/dupla/equipe
-    rodada: int = Field(..., ge=1)       # Rodada (1 = Preliminar, 2 = Semis, etc.)
-    numero_match: int                    # Sequência dentro da divisão
-    divisao: str
-    categoria: str
 
-    tipo_poomsae: TipoPoomsaeMatch
-    forma_designada: str                 # Forma sorteada pelo Drawing of Lots
+    # Campos opcionais para criação via MesarioPanel
+    luta_id: Optional[str] = None
+    atleta_id: Optional[str] = None
+    inscricao_id: Optional[str] = None  # Usado em fluxo de Drawing of Lots
+
+    rodada: int = Field(default=1, ge=1)
+    numero_match: Optional[int] = None
+    divisao: str = "Geral"
+    categoria: Optional[str] = None
+
+    # Aceita "tipo_poomsae" (padrão) ou "tipo" (enviado pelo MesarioPanel)
+    tipo_poomsae: Optional[TipoPoomsaeMatch] = None
+    tipo: Optional[str] = None
+
+    forma_designada: str = "Poomsae"
 
     # Timing (Artigo 11)
     tempo_limite_seg: int = Field(default=90, description="90s Recognized, 100s Freestyle")
     tempo_executado_seg: Optional[int] = None
 
     # Juízes
+    numero_juizes: Optional[int] = 5
     referee_id: Optional[str] = None
     juiz_ids: List[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def normalizar_tipo_poomsae(self):
+        """Normaliza o campo tipo/tipo_poomsae para sempre ter tipo_poomsae definido"""
+        if not self.tipo_poomsae and self.tipo:
+            try:
+                self.tipo_poomsae = TipoPoomsaeMatch(self.tipo)
+            except ValueError:
+                self.tipo_poomsae = TipoPoomsaeMatch.RECOGNIZED
+        if not self.tipo_poomsae:
+            self.tipo_poomsae = TipoPoomsaeMatch.RECOGNIZED
+        return self
 
 
 class Match(MatchCreate):
