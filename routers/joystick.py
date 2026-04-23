@@ -826,6 +826,19 @@ async def websocket_mesario_poomsae(websocket: WebSocket, luta_id: str):
             # Se receber "ping", responder com "pong"
             if data.get("tipo") == "ping":
                 await websocket.send_json({"tipo": "pong"})
+
+            # Relay de eventos do mesário para todos os laterais do campeonato
+            elif data.get("tipo") == "poomsae_match_iniciado":
+                # Nota: luta_id neste handler é na verdade o campeonato_id
+                # (MesarioPanel conecta via /ws/mesario/{campeonato_id})
+                campeonato_id_relay = data.get("campeonato_id") or luta_id
+                await manager.broadcast_to_luta(campeonato_id_relay, data)
+                logger.debug(f"📡 RELAY poomsae_match_iniciado → laterais do camp {campeonato_id_relay}")
+
+            elif data.get("tipo") == "poomsae_encerrado":
+                campeonato_id_relay = data.get("campeonato_id") or luta_id
+                await manager.broadcast_to_luta(campeonato_id_relay, data)
+                logger.debug(f"📡 RELAY poomsae_encerrado → laterais do camp {campeonato_id_relay}")
     
     except WebSocketDisconnect:
         logger.debug(f"\n{'='*60}")
