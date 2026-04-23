@@ -54,8 +54,8 @@ class ScoreRecognized(BaseModel):
     @model_validator(mode="after")
     def validar_incrementos(self):
         for campo, val in [("acuracia", self.acuracia), ("apresentacao", self.apresentacao)]:
-            # WT usa incrementos de 0.1
-            if round(val * 10) != val * 10:
+            # WT usa incrementos de 0.1 — usar tolerância para floating point (ex: 0.3 → 2.9999...)
+            if abs(round(val * 10) - val * 10) > 0.01:
                 raise ValueError(f"{campo}: use incrementos de 0.1")
         return self
 
@@ -79,7 +79,7 @@ class ScoreFreestyle(BaseModel):
     @model_validator(mode="after")
     def validar_incrementos(self):
         for campo, val in [("habilidade_tecnica", self.habilidade_tecnica), ("apresentacao", self.apresentacao)]:
-            if round(val * 10) != val * 10:
+            if abs(round(val * 10) - val * 10) > 0.01:
                 raise ValueError(f"{campo}: use incrementos de 0.1")
         return self
 
