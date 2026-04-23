@@ -566,53 +566,152 @@ async def atualizar_turno_poomsae(luta_id: str, dados: dict, db: AsyncIOMotorDat
     return {"mensagem": f"Turno Poomsae atualizado para: {turno}"}
 
 
+
+
+# ── Helpers para sorteio de Poomsae ──────────────────────────────────────────
+
+def _poomsae_colorida(cat_lower: str) -> str:
+    """Retorna o poomsae correto para faixas coloridas (regra WT)"""
+    if "8 gub" in cat_lower or ("amarela" in cat_lower and "verde" not in cat_lower):
+        return "Taegeuk Il Jang"
+    if "7 gub" in cat_lower or "amarela verde" in cat_lower or "amarelo verde" in cat_lower:
+        return "Taegeuk Yi Jang"
+    if "6 gub" in cat_lower or ("verde" in cat_lower and "amarela" not in cat_lower and "azul" not in cat_lower):
+        return "Taegeuk Sam Jang"
+    if "5 gub" in cat_lower or ("azul" in cat_lower and "escur" not in cat_lower):
+        return "Taegeuk Sa Jang"
+    if "4 gub" in cat_lower or "azul escura" in cat_lower:
+        return "Taegeuk Oh Jang"
+    if "3 gub" in cat_lower or ("vermelh" in cat_lower and "escur" not in cat_lower and "preta" not in cat_lower):
+        return "Taegeuk Yuk Jang"
+    if "2 gub" in cat_lower or "vermelha escura" in cat_lower:
+        return "Taegeuk Chil Jang"
+    if "1 gub" in cat_lower or "poom" in cat_lower:
+        return "Taegeuk Pal Jang"
+    return "Taegeuk da Faixa"
+
+
+def _grupo_etario(idade_genero: str) -> str:
+    s = idade_genero.lower()
+    if "cadete" in s: return "Cadete"
+    if "juvenil" in s or "sub 17" in s or "sub17" in s: return "Juvenil"
+    if "sub 30" in s or "sub30" in s: return "Sub 30"
+    if "sub 40" in s or "sub40" in s: return "Sub 40"
+    if "sub 50" in s or "sub50" in s: return "Sub 50"
+    if "master" in s or "sub 60" in s or "sub60" in s: return "Master"
+    return "Sub 30"  # adulto/fallback usa pool Sub 30
+
+
 @router.post("/campeonatos/{camp_id}/sortear-poomsaes")
 async def sortear_poomsaes_campeonato(camp_id: str, db: AsyncIOMotorDatabase = Depends(get_db)):
-    """Sorteia os Poomsaes oficiais para as categorias de Faixa Preta"""
-    lutas_poomsae = await db.lutas.find({"campeonato_id": camp_id, "modalidade": "Poomsae"}).to_list(length=1000)
-    
-    atualizados = 0
+    """Sorteia os Poomsaes oficiais — Faixa Preta 2 formas (WT), Colorida 1 forma fixa, Freestyle livre"""
+
+    campeonato = await db.campeonatos.find_one({"_id": ObjectId(camp_id)})
+    if not campeonato:
+        raise HTTPException(status_code=404, detail="Campeonato não encontrado")
+
+    # Mapa de categorias: {cat_id → {idade_genero, peso_ou_tipo, graduacao}}
+    mapa_cat = {c["id"]: c for c in campeonato.get("categorias", [])}
+
+    lutas_poomsae = await db.lutas.find(
+        {"campeonato_id": camp_id, "modalidade": "Poomsae"}
+    ).to_list(length=1000)
+
+    # Processa por categoria (evita re-sortear a mesma cat em lutas múltiplas)
+    categorias_processadas: dict = {}  # {cat_id: {poomsae_1, poomsae_2, nome_display}}
+
     for luta in lutas_poomsae:
-        if "freestyle" in luta.get("nome_categoria", "").lower():
-            await db.lutas.update_one({"_id": luta["_id"]}, {"$set": {"poomsae_1": "Poomsae Free Style", "poomsae_2": None}})
-            continue
-            
-        if "colorida" in luta.get("nome_categoria", "").lower() or "gub" in luta.get("nome_categoria", "").lower():
-            await db.lutas.update_one({"_id": luta["_id"]}, {"$set": {"poomsae_1": "Poomsae da Faixa Atual", "poomsae_2": None}})
+        cat_id = luta.get("categoria_id", "")
+
+        if cat_id in categorias_processadas:
+            # Já sorteado — só aplica o mesmo resultado
+            info = categorias_processadas[cat_id]
+            await db.lutas.update_one(
+                {"_id": luta["_id"]},
+                {"$set": {"poomsae_1": info["poomsae_1"], "poomsae_2": info["poomsae_2"]}}
+            )
             continue
 
-        cat_nome = luta.get("nome_categoria", "")
-        grupo = "Adulto"
-        if "Cadete" in cat_nome: grupo = "Cadete"
-        elif "Juvenil" in cat_nome or "Sub 17" in cat_nome: grupo = "Juvenil"
-        elif "Sub 30" in cat_nome: grupo = "Sub 30"
-        elif "Sub 40" in cat_nome: grupo = "Sub 40"
-        elif "Sub 50" in cat_nome: grupo = "Sub 50"
-        elif "Sub 60" in cat_nome or "Master" in cat_nome: grupo = "Master"
+        cat = mapa_cat.get(cat_id, {})
+        idade_genero = cat.get("idade_genero", "")
+        peso_ou_tipo = cat.get("peso_ou_tipo", "")
+        graduacao = cat.get("graduacao", "")
+        nome_display = f"{idade_genero} {peso_ou_tipo}".strip() or cat_id
 
-        pool = POOMSAES_WT.get(grupo, POOMSAES_WT["Sub 30"])
-        sorteados = random.sample(pool, 2)
-        
-        await db.lutas.update_one({"_id": luta["_id"]}, {"$set": {"poomsae_1": sorteados[0], "poomsae_2": sorteados[1]}})
-        atualizados += 1
-    
-    # Criar notícia do sorteio
-    from datetime import datetime
+        cat_lower = (idade_genero + " " + peso_ou_tipo + " " + graduacao).lower()
+
+        if "freestyle" in cat_lower:
+            # Freestyle — forma livre, sem sorteio
+            p1, p2 = "Poomsae Free Style", None
+            tipo_cat = "Freestyle"
+
+        elif "colorida" in graduacao.lower() or "gub" in cat_lower or "geup" in cat_lower:
+            # Regra WT: faixa colorida executa 1 poomsae (o da própria faixa)
+            p1 = _poomsae_colorida(cat_lower)
+            p2 = None
+            tipo_cat = "Colorida"
+
+        else:
+            # Faixa Preta Recognized: sortear 2 formas do pool do grupo etário
+            grupo = _grupo_etario(idade_genero)
+            pool = POOMSAES_WT.get(grupo, POOMSAES_WT["Sub 30"])
+            sorteados = random.sample(pool, min(2, len(pool)))
+            p1 = sorteados[0]
+            p2 = sorteados[1] if len(sorteados) > 1 else None
+            tipo_cat = "Preta"
+
+        await db.lutas.update_one(
+            {"_id": luta["_id"]},
+            {"$set": {"poomsae_1": p1, "poomsae_2": p2}}
+        )
+        categorias_processadas[cat_id] = {
+            "poomsae_1": p1, "poomsae_2": p2,
+            "nome_display": nome_display, "tipo": tipo_cat,
+        }
+
+    resultado_categorias = sorted(
+        [
+            {
+                "categoria": v["nome_display"],
+                "tipo": v["tipo"],
+                "poomsae_1": v["poomsae_1"],
+                "poomsae_2": v["poomsae_2"],
+            }
+            for v in categorias_processadas.values()
+        ],
+        key=lambda x: x["categoria"]
+    )
+
+    # Notícia detalhada com a lista de sorteios
+    linhas = []
+    for cat in resultado_categorias:
+        if cat["poomsae_2"]:
+            linhas.append(f"• {cat['categoria']}: {cat['poomsae_1']} | {cat['poomsae_2']}")
+        else:
+            linhas.append(f"• {cat['categoria']}: {cat['poomsae_1']}")
+
+    conteudo_noticia = (
+        f"Poomsaes sorteados para o campeonato ({len(categorias_processadas)} categorias):\n\n"
+        + "\n".join(linhas)
+    )
+
     noticia_sorteio = {
-        "titulo": f"🎲 Sorteio de Poomsaes Realizado",
-        "conteudo": f"{atualizados} chaves foram atualizadas com os Poomsaes oficiais. Os atletas devem consultar seu quadro de apresentações.",
+        "titulo": "🎲 Sorteio de Poomsaes Realizado",
+        "conteudo": conteudo_noticia,
         "campeonato_id": camp_id,
         "tipo": "sortear_poomsae",
         "data_criacao": datetime.utcnow().isoformat(),
-        "ativa": True
+        "ativa": True,
     }
-    
     try:
         await db.noticias.insert_one(noticia_sorteio)
     except Exception as e:
-        print(f"Aviso: Não foi possível criar notícia do sorteio: {str(e)}")
-        
-    return {"mensagem": f"Sorteio concluído! {atualizados} chaves atualizadas com os Poomsaes oficiais."}
+        print(f"Aviso: Não foi possível criar notícia do sorteio: {e}")
+
+    return {
+        "mensagem": f"Sorteio concluído! {len(categorias_processadas)} categorias atualizadas.",
+        "categorias": resultado_categorias,
+    }
 
 
 
