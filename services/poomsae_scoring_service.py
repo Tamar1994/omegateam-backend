@@ -47,10 +47,11 @@ def _calcular_componente(scores: List[float]) -> DetalheCalculo:
     score_min = min(scores)
     scores_copia = scores.copy()
 
-    if n >= 3:
-        # Algoritmo WT padrão: remove máximo e mínimo
+    if n >= 4:
+        # Com 4+ juízes: descarta maior e menor, média das intermediárias
         scores_copia.remove(score_max)
         scores_copia.remove(score_min)
+    # Com 1-3 juízes: média direta (sem descarte)
 
     media = round(sum(scores_copia) / len(scores_copia), 2)
 
