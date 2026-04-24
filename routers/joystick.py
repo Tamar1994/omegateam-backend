@@ -99,13 +99,21 @@ class ConnectionManager:
             "timestamp": datetime.now().isoformat()
         }
         
-        # Enviar para TODOS os Mesários desta luta
+        # Enviar para TODOS os Mesários desta luta (kyorugui)
         for key, websocket in list(self.mesario_connections.items()):
             # Nota: Mesário armazena como "luta_id:numero_quadra", vamos enviar para todos por enquanto
             try:
                 await websocket.send_json(mensagem)
             except Exception as e:
                 logger.debug(f"❌ Erro ao notificar Mesário {key}: {e}")
+
+        # Enviar também para todos os Mesários Poomsae conectados
+        for luta_id_key, ws_list in list(poomsae_mesario_connections.items()):
+            for websocket in list(ws_list):
+                try:
+                    await websocket.send_json(mensagem)
+                except Exception as e:
+                    logger.debug(f"❌ Erro ao notificar Mesário Poomsae {luta_id_key}: {e}")
 
     async def notificar_luta_iniciada(self, campeonato_id: str, luta_data: dict):
         """
