@@ -37,23 +37,20 @@ def _serialize(doc: dict) -> dict:
 def _calcular_componente(scores: List[float]) -> DetalheCalculo:
     """
     Remove o MAIOR e o MENOR score, calcula a média dos restantes.
-    Funciona para 5 ou 7 juízes.
-
-    Exemplo com 7 juízes: [3.2, 3.5, 3.8, 3.6, 3.4, 3.7, 3.3]
-      Máximo: 3.8 → removido
-      Mínimo: 3.2 → removido
-      Restantes: [3.5, 3.6, 3.4, 3.7, 3.3] → média = 3.50
+    Com 3+ juízes aplica trimming WT. Com 1-2 juízes usa a média direta.
     """
-    if len(scores) < 5:
-        raise ValueError(f"Mínimo 5 scores necessários, recebido {len(scores)}")
+    n = len(scores)
+    if n == 0:
+        raise ValueError("Nenhum score recebido")
 
     score_max = max(scores)
     score_min = min(scores)
-
-    # Remover apenas UMA ocorrência de cada (caso de empate em max ou min)
     scores_copia = scores.copy()
-    scores_copia.remove(score_max)
-    scores_copia.remove(score_min)
+
+    if n >= 3:
+        # Algoritmo WT padrão: remove máximo e mínimo
+        scores_copia.remove(score_max)
+        scores_copia.remove(score_min)
 
     media = round(sum(scores_copia) / len(scores_copia), 2)
 
@@ -63,7 +60,7 @@ def _calcular_componente(scores: List[float]) -> DetalheCalculo:
         score_min=score_min,
         scores_validos=scores_copia,
         media=media,
-        num_juizes=len(scores),
+        num_juizes=n,
     )
 
 
@@ -202,7 +199,7 @@ async def submeter_score(db: AsyncIOMotorDatabase, dados: ScoreJuiz) -> dict:
     )
 
     # Verificar se todos os juízes submeteram → calcular automaticamente
-    total_juizes = len(match.get("juiz_ids", [])) + 1  # +1 referee
+    total_juizes = match.get("numero_juizes") or (len(match.get("juiz_ids", [])) + 1)
     scores_recebidos = await db.poomsae_scores.count_documents({"match_id": dados.match_id})
     if scores_recebidos >= total_juizes:
         await calcular_pontuacao_final(db, dados.match_id)
@@ -253,10 +250,11 @@ async def calcular_pontuacao_final(db: AsyncIOMotorDatabase, match_id: str) -> d
     match = await obter_match(db, match_id)
     scores_raw = await db.poomsae_scores.find({"match_id": match_id}).to_list(length=20)
 
-    if len(scores_raw) < 5:
+    min_scores = match.get("numero_juizes") or 1
+    if len(scores_raw) < min_scores:
         raise HTTPException(
             status_code=400,
-            detail=f"Mínimo 5 scores necessários para calcular. Recebidos: {len(scores_raw)}"
+            detail=f"Aguardando {min_scores - len(scores_raw)} score(s) pendente(s). Recebidos: {len(scores_raw)}/{min_scores}"
         )
 
     tipo = match.get("tipo_poomsae")
