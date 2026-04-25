@@ -73,6 +73,12 @@ async def listar_scores(match_id: str, db: AsyncIOMotorDatabase = Depends(get_db
     return await service.listar_scores_match(db, match_id)
 
 
+@router.post("/matches/{match_id}/timer-iniciado")
+async def marcar_timer_iniciado(match_id: str, db: AsyncIOMotorDatabase = Depends(get_db)):
+    """Registra o momento exato em que o mesário iniciou o cronômetro (usado pelo Scoreboard)"""
+    return await service.marcar_timer_iniciado(db, match_id)
+
+
 # ── Cálculo ──────────────────────────────────
 
 @router.post("/matches/{match_id}/calcular")

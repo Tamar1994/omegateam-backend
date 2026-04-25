@@ -138,6 +138,18 @@ async def iniciar_match(db: AsyncIOMotorDatabase, match_id: str) -> dict:
     return await obter_match(db, match_id)
 
 
+async def marcar_timer_iniciado(db: AsyncIOMotorDatabase, match_id: str) -> dict:
+    """Registra o momento em que o mesário pressionou play — usado pelo Scoreboard para sincronizar o timer."""
+    match = await obter_match(db, match_id)
+    # Só grava na primeira vez; pausas posteriores não sobrescrevem
+    if not match.get("timestamp_timer_iniciado"):
+        await db.poomsae_matches.update_one(
+            {"_id": ObjectId(match_id)},
+            {"$set": {"timestamp_timer_iniciado": datetime.utcnow()}}
+        )
+    return {"status": "ok", "match_id": match_id}
+
+
 # ─────────────────────────────────────────────
 #  Score de juízes
 # ─────────────────────────────────────────────
